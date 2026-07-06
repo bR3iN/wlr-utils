@@ -306,3 +306,17 @@ impl Gpu {
         self.egl.swap_buffers(self.display, self.surface).ok();
     }
 }
+
+impl Drop for Gpu {
+    /// Release this surface's EGL context and window surface. Several `Gpu`s share one
+    /// `EGLDisplay` (one per output), so dropping one — e.g. when its output is unplugged —
+    /// must destroy its own handles. Leaking them corrupts the shared display's state and
+    /// the next `eglCreateWindowSurface` (the monitor plugged back in) fails with
+    /// `EGL_BAD_ALLOC`. Detach the context first, then destroy the surface while its
+    /// `WlEglSurface` native window is still alive — that field is dropped afterwards.
+    fn drop(&mut self) {
+        let _ = self.egl.make_current(self.display, None, None, None);
+        let _ = self.egl.destroy_surface(self.display, self.surface);
+        let _ = self.egl.destroy_context(self.display, self.context);
+    }
+}

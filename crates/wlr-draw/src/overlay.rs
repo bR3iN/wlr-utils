@@ -110,6 +110,9 @@ const VEIL_SCAN: f32 = 2.0;
 /// One output's transparent overlay surface and its GL context.
 struct Surface {
     layer: LayerSurface,
+    /// The output this overlay lives on, kept so it can be dropped when that output is
+    /// unplugged (`output_destroyed`) rather than taking the whole daemon down.
+    output: wl_output::WlOutput,
     /// Output top-left in the global logical space (maps pointer ↔ stroke coords).
     logical_x: i32,
     logical_y: i32,
@@ -236,6 +239,10 @@ struct State {
     /// Calloop handle, needed to wire up keyboard repeat when the seat appears.
     loop_handle: LoopHandle<'static, State>,
     surfaces: Vec<Surface>,
+    /// Kept so overlays can be (re)built when an output is hotplugged mid-session, not
+    /// only at startup.
+    compositor: CompositorState,
+    layer_shell: LayerShell,
     /// A pre-made empty region: set as the input region for click-through.
     empty_region: Region,
     theme: Theme,
@@ -348,6 +355,60 @@ impl State {
             .iter()
             .find(|s| s.layer.wl_surface() == surface)
             .map(|s| (s.logical_x as f64 + pos.0, s.logical_y as f64 + pos.1))
+    }
+
+    /// Build the click-through overlay surface for one output and track it. Used both at
+    /// startup and on hotplug (`new_output`), so a monitor connected mid-session gets an
+    /// overlay too. Idempotent: a second call for an output we already cover is a no-op,
+    /// so the startup enumeration and any `new_output` for the same output can't double up.
+    /// The new surface adopts the current draw/pass-through state so a monitor plugged in
+    /// while drawing behaves like the others.
+    fn add_output_surface(&mut self, wl_out: &wl_output::WlOutput, qh: &QueueHandle<State>) {
+        if self.surfaces.iter().any(|s| &s.output == wl_out) {
+            return;
+        }
+        let Some(info) = self.output_state.info(wl_out) else {
+            return;
+        };
+        let (lx, ly) = info.logical_position.unwrap_or((0, 0));
+        let surface = self.compositor.create_surface(qh);
+        let layer = self.layer_shell.create_layer_surface(
+            qh,
+            surface,
+            Layer::Overlay,
+            Some("wlr-draw"),
+            Some(wl_out),
+        );
+        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
+        layer.set_exclusive_zone(-1);
+        // Match the live input state so a monitor plugged in mid-draw behaves like the
+        // rest. Keyboard is grabbed for the whole draw session (pass-through only lets the
+        // *pointer* fall through); the pointer region is empty unless we're actively
+        // grabbing (draw mode and not passing through).
+        layer.set_keyboard_interactivity(if self.draw_mode {
+            KeyboardInteractivity::Exclusive
+        } else {
+            KeyboardInteractivity::None
+        });
+        if !self.draw_mode || self.passthrough {
+            layer
+                .wl_surface()
+                .set_input_region(Some(self.empty_region.wl_region()));
+        }
+        layer.commit();
+
+        self.surfaces.push(Surface {
+            layer,
+            output: wl_out.clone(),
+            logical_x: lx,
+            logical_y: ly,
+            egui_ctx: egui::Context::default(),
+            gpu: None,
+            width: 0,
+            height: 0,
+            scale: 1,
+            frozen_tex: None,
+        });
     }
 
     /// Enter or leave draw mode: switch every surface between a full input region +
@@ -1142,6 +1203,8 @@ pub fn run() -> anyhow::Result<()> {
         pointer: None,
         loop_handle: lh.clone(),
         surfaces: Vec::new(),
+        compositor,
+        layer_shell,
         empty_region,
         theme,
         keymap,
@@ -1186,43 +1249,12 @@ pub fn run() -> anyhow::Result<()> {
         quit: false,
     };
 
-    // Enumerate outputs, then build one click-through overlay surface per output.
+    // Build one click-through overlay for each output present at startup; later hotplug
+    // is handled live by the OutputHandler (new_output / output_destroyed).
     event_queue.roundtrip(&mut state)?;
     let outputs: Vec<_> = state.output_state.outputs().collect();
     for wl_out in outputs {
-        let Some(info) = state.output_state.info(&wl_out) else {
-            continue;
-        };
-        let (lx, ly) = info.logical_position.unwrap_or((0, 0));
-        let surface = compositor.create_surface(&qh);
-        let layer = layer_shell.create_layer_surface(
-            &qh,
-            surface,
-            Layer::Overlay,
-            Some("wlr-draw"),
-            Some(&wl_out),
-        );
-        layer.set_anchor(Anchor::TOP | Anchor::BOTTOM | Anchor::LEFT | Anchor::RIGHT);
-        layer.set_keyboard_interactivity(KeyboardInteractivity::None);
-        layer.set_exclusive_zone(-1);
-        // Start click-through: an empty input region lets everything pass to the apps
-        // below until the user toggles draw mode.
-        layer
-            .wl_surface()
-            .set_input_region(Some(state.empty_region.wl_region()));
-        layer.commit();
-
-        state.surfaces.push(Surface {
-            layer,
-            logical_x: lx,
-            logical_y: ly,
-            egui_ctx: egui::Context::default(),
-            gpu: None,
-            width: 0,
-            height: 0,
-            scale: 1,
-            frozen_tex: None,
-        });
+        state.add_output_surface(&wl_out, &qh);
     }
     if state.surfaces.is_empty() {
         anyhow::bail!("no outputs to draw on");
@@ -2222,8 +2254,13 @@ impl CompositorHandler for State {
 }
 
 impl LayerShellHandler for State {
-    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &LayerSurface) {
-        self.quit = true;
+    fn closed(&mut self, _: &Connection, _: &QueueHandle<Self>, layer: &LayerSurface) {
+        // One output's surface going away (a monitor unplugged, or the compositor tearing
+        // down surfaces as it reconfigures displays) must not take the whole daemon down —
+        // drop just that overlay and keep annotating the rest. If it was the last one we
+        // idle with no surfaces until an output returns, which `new_output` rebuilds.
+        self.surfaces
+            .retain(|s| s.layer.wl_surface() != layer.wl_surface());
     }
 
     fn configure(
@@ -2508,9 +2545,31 @@ impl OutputHandler for State {
     fn output_state(&mut self) -> &mut OutputState {
         &mut self.output_state
     }
-    fn new_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
-    fn output_destroyed(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_output::WlOutput) {}
+    fn new_output(&mut self, _: &Connection, qh: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        // A monitor connected mid-session gets its own overlay, so annotation follows the
+        // display setup instead of being frozen to whatever was present at launch.
+        self.add_output_surface(&output, qh);
+    }
+
+    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
+        // Keep the pointer↔stroke mapping honest when outputs are rearranged: refresh this
+        // surface's logical origin from the new geometry.
+        if let Some((lx, ly)) = self.output_state.info(&output).and_then(|i| i.logical_position)
+            && let Some(s) = self.surfaces.iter_mut().find(|s| s.output == output)
+        {
+            s.logical_x = lx;
+            s.logical_y = ly;
+        }
+    }
+
+    fn output_destroyed(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
+        self.surfaces.retain(|s| s.output != output);
+    }
 }
 
 impl ProvidesRegistryState for State {
