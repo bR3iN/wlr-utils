@@ -2551,10 +2551,18 @@ impl OutputHandler for State {
         self.add_output_surface(&output, qh);
     }
 
-    fn update_output(&mut self, _: &Connection, _: &QueueHandle<Self>, output: wl_output::WlOutput) {
+    fn update_output(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        output: wl_output::WlOutput,
+    ) {
         // Keep the pointer↔stroke mapping honest when outputs are rearranged: refresh this
         // surface's logical origin from the new geometry.
-        if let Some((lx, ly)) = self.output_state.info(&output).and_then(|i| i.logical_position)
+        if let Some((lx, ly)) = self
+            .output_state
+            .info(&output)
+            .and_then(|i| i.logical_position)
             && let Some(s) = self.surfaces.iter_mut().find(|s| s.output == output)
         {
             s.logical_x = lx;
