@@ -278,10 +278,6 @@ systemctl --user disable --now wlr-draw.service
 rm -f ~/.config/systemd/user/wlr-draw.service
 ```
 
-## Limitations
-
-- One daemon per session (a second `wlr-draw` exits with "already running").
-
 ## License
 
 MIT OR Apache-2.0.
