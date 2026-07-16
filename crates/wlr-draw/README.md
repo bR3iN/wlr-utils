@@ -6,10 +6,10 @@
 
 Draw and annotate **live on screen** on wlroots compositors — a native, Wayland-first
 take on [gromit-mpx](https://github.com/bk138/gromit-mpx). A transparent, always-on-top
-overlay floats over every output; toggle draw mode to scribble freehand strokes, lines,
-rectangles, ellipses, arrows and text over whatever is on screen, then toggle it off to
-go back to clicking through to your apps — the annotations stay visible until you clear
-them.
+overlay floats over every output, including monitors plugged in mid-session; toggle draw
+mode to scribble freehand strokes, lines, rectangles, ellipses, arrows and text over
+whatever is on screen, then toggle it off to go back to clicking through to your apps —
+the annotations stay visible until you clear them.
 
 <p align="center">
   <img src="https://raw.githubusercontent.com/sjourdois/wlr-utils/main/docs/assets/wlr-draw/annotate.gif"
@@ -280,8 +280,6 @@ rm -f ~/.config/systemd/user/wlr-draw.service
 
 ## Limitations
 
-- Overlays are built for the outputs present at start-up; hot-plugged monitors are not
-  picked up until the daemon is restarted.
 - One daemon per session (a second `wlr-draw` exits with "already running").
 
 ## License
