@@ -1,5 +1,9 @@
 # wlr-utils
 
+[![CI](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/wlr-utils.svg)](https://crates.io/crates/wlr-utils)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 The **[wlr-utils](https://github.com/sjourdois/wlr-utils)** suite in a single install —
 five sharp screen tools for **wlroots** compositors, all sharing one capture engine.
 

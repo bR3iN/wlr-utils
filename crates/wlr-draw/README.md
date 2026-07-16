@@ -1,5 +1,9 @@
 # wlr-draw
 
+[![CI](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/wlr-draw.svg)](https://crates.io/crates/wlr-draw)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 Draw and annotate **live on screen** on wlroots compositors — a native, Wayland-first
 take on [gromit-mpx](https://github.com/bk138/gromit-mpx). A transparent, always-on-top
 overlay floats over every output; toggle draw mode to scribble freehand strokes, lines,
@@ -279,3 +283,7 @@ rm -f ~/.config/systemd/user/wlr-draw.service
 - Overlays are built for the outputs present at start-up; hot-plugged monitors are not
   picked up until the daemon is restarted.
 - One daemon per session (a second `wlr-draw` exits with "already running").
+
+## License
+
+MIT OR Apache-2.0.

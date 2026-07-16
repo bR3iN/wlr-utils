@@ -1,5 +1,9 @@
 # wlr-shot
 
+[![CI](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/wlr-shot.svg)](https://crates.io/crates/wlr-shot)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
+
 Screen capture for **wlroots** compositors, built on the shared
 [`wlr-capture`](../wlr-capture) engine (`ext-image-copy-capture-v1`, correct
 strides, occlusion-independent).

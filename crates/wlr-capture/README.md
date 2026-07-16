@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/wlr-capture.svg)](https://crates.io/crates/wlr-capture)
+[![docs.rs](https://docs.rs/wlr-capture/badge.svg)](https://docs.rs/wlr-capture)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 The shared engine behind the [wlr-utils](https://github.com/sjourdois/wlr-utils)

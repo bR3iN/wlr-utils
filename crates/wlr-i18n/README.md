@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml/badge.svg)](https://github.com/sjourdois/wlr-utils/actions/workflows/ci.yml)
 [![crates.io](https://img.shields.io/crates/v/wlr-i18n.svg)](https://crates.io/crates/wlr-i18n)
+[![docs.rs](https://docs.rs/wlr-i18n/badge.svg)](https://docs.rs/wlr-i18n)
 [![License: MIT OR Apache-2.0](https://img.shields.io/badge/license-MIT%20OR%20Apache--2.0-blue.svg)](#license)
 
 Shared localisation plumbing for the [wlr-utils](https://github.com/sjourdois/wlr-utils)
