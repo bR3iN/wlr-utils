@@ -5,6 +5,11 @@ on:
     tags: ['v*']
   workflow_dispatch: {} # allow manual re-publish of the current Cargo.toml version
 
+# Publishing authenticates to crates.io with CARGO_REGISTRY_TOKEN; the GITHUB_TOKEN
+# only ever needs to check out the tag.
+permissions:
+  contents: read
+
 jobs:
   crates-io:
     runs-on: ubuntu-latest
