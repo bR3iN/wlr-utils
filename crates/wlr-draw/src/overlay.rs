@@ -123,6 +123,14 @@ struct Surface {
     scale: u32,
     /// This output's frozen screenshot (freeze-frame), uploaded as an egui texture.
     frozen_tex: Option<egui::TextureHandle>,
+    /// Set from committing a frame until its `wl_surface.frame` callback comes back.
+    /// While it holds, the compositor has not consumed the last buffer — presenting
+    /// again would block in `eglSwapBuffers` (the NVIDIA EGL platform waits there on
+    /// its own event queue), freezing the whole daemon on an output that stopped
+    /// composing: asleep, blanked, or gone. So we defer instead.
+    frame_pending: bool,
+    /// A repaint that fell due while `frame_pending` held; replayed once it clears.
+    needs_redraw: bool,
 }
 
 impl Surface {
@@ -139,7 +147,7 @@ impl Surface {
 
     /// Repaint: clear transparent, then the document and any in-progress gesture, all
     /// translated into this surface's local coordinates, plus the draw-mode HUD.
-    fn render(&mut self, conn: &Connection, frame: &Frame) {
+    fn render(&mut self, conn: &Connection, qh: &QueueHandle<State>, frame: &Frame) {
         self.ensure_gpu(conn);
         if self.width == 0 {
             return;
@@ -157,6 +165,10 @@ impl Surface {
         let Some(gpu) = self.gpu.as_mut() else {
             return;
         };
+        // Ask for the frame callback before presenting: `eglSwapBuffers` commits the
+        // surface itself, so the request has to be queued to ride along with that commit.
+        let wl_surface = self.layer.wl_surface().clone();
+        wl_surface.frame(qh, wl_surface.clone());
         gpu.render(
             &self.egui_ctx,
             raw_input,
@@ -165,6 +177,8 @@ impl Surface {
             [0.0, 0.0, 0.0, 0.0], // transparent: the live screen shows through
             |ui, _imp| paint(ui, lx, ly, frame, frozen_tex),
         );
+        self.frame_pending = true;
+        self.needs_redraw = false;
         self.layer.commit();
     }
 }
@@ -316,7 +330,10 @@ struct State {
 }
 
 impl State {
-    fn redraw_all(&mut self, conn: &Connection) {
+    /// Repaint every surface that the compositor is ready to take a new frame from.
+    /// Surfaces still owing us a frame callback are skipped and flagged, so an output
+    /// that stopped composing never drags the main thread into a blocking present.
+    fn redraw_all(&mut self, conn: &Connection, qh: &QueueHandle<State>) {
         let flash = self.flash_value();
         // Disjoint borrows: the frame view reads `doc`/`gesture`/… while we iterate
         // `surfaces` mutably.
@@ -345,7 +362,11 @@ impl State {
             selected: self.selected,
         };
         for s in &mut self.surfaces {
-            s.render(conn, &frame);
+            if s.frame_pending {
+                s.needs_redraw = true;
+                continue;
+            }
+            s.render(conn, qh, &frame);
         }
     }
 
@@ -408,6 +429,8 @@ impl State {
             height: 0,
             scale: 1,
             frozen_tex: None,
+            frame_pending: false,
+            needs_redraw: false,
         });
     }
 
@@ -1313,7 +1336,7 @@ pub fn run() -> anyhow::Result<()> {
         }
         if state.dirty {
             state.dirty = false;
-            state.redraw_all(&conn);
+            state.redraw_all(&conn, &qh);
         }
     }
 
@@ -2233,7 +2256,28 @@ impl CompositorHandler for State {
     ) {
     }
 
-    fn frame(&mut self, _: &Connection, _: &QueueHandle<Self>, _: &wl_surface::WlSurface, _: u32) {}
+    /// The compositor consumed our last buffer for this surface and is ready for the
+    /// next one. Clearing `frame_pending` re-arms it; a repaint deferred while we were
+    /// waiting is replayed on the next tick.
+    fn frame(
+        &mut self,
+        _: &Connection,
+        _: &QueueHandle<Self>,
+        surface: &wl_surface::WlSurface,
+        _: u32,
+    ) {
+        let deferred = self
+            .surfaces
+            .iter_mut()
+            .find(|s| s.layer.wl_surface() == surface)
+            .is_some_and(|s| {
+                s.frame_pending = false;
+                s.needs_redraw
+            });
+        if deferred {
+            self.dirty = true;
+        }
+    }
 
     fn surface_enter(
         &mut self,
@@ -2280,6 +2324,10 @@ impl LayerShellHandler for State {
             if let Some(gpu) = s.gpu.as_ref() {
                 gpu.resize((s.width * s.scale) as i32, (s.height * s.scale) as i32);
             }
+            // A configure means the compositor wants a fresh buffer, so stop waiting on
+            // any outstanding frame callback: one owed by an output that disappeared
+            // mid-frame never arrives, and would otherwise strand this surface for good.
+            s.frame_pending = false;
         }
         // Attach the (transparent) buffer on the next loop tick.
         self.dirty = true;

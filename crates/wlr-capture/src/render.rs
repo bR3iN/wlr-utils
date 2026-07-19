@@ -215,6 +215,14 @@ impl Gpu {
         egl.make_current(display, Some(egl_surface), Some(egl_surface), Some(context))
             .expect("eglMakeCurrent");
 
+        // Present without EGL's own throttling: on Wayland the compositor paces us
+        // through `wl_surface.frame`, and a blocking `eglSwapBuffers` on top of that is
+        // not just redundant but dangerous. It waits on the driver's private event queue
+        // for a buffer release that never comes if the output stopped composing — asleep,
+        // blanked or gone — wedging the calling thread for as long as that lasts. Callers
+        // pace themselves on frame callbacks instead.
+        let _ = egl.swap_interval(display, 0);
+
         let gl = unsafe {
             glow::Context::from_loader_function(|s| {
                 egl.get_proc_address(s)
