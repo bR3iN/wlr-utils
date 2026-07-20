@@ -8,7 +8,7 @@
 //! that only streams frames through [`sink`](crate::sink) doesn't pull it in.
 
 use crate::error::{CaptureError, Context, Result};
-use crate::wl::{CapturedImage, Client, Frame, Output, Region};
+use crate::wl::{CapturedImage, Client, Frame, Output, Region, Toplevel};
 use std::time::Duration;
 
 /// Default time to wait for a one-shot frame from a source.
@@ -64,6 +64,77 @@ pub fn capture_window(
         .find(|t| t.identifier == id)
         .cloned()
         .ok_or_else(|| CaptureError::WindowNotFound(id.to_string()))?;
+    frame_to_image(client.capture_toplevel_once(&tl, budget)?)
+}
+
+/// Which window to act on, described the way a user thinks of it rather than by the
+/// opaque identifier the compositor assigns. At least one field must be set; both
+/// together narrow the match.
+#[derive(Clone, Copy, Debug, Default)]
+pub struct WindowFilter<'a> {
+    /// Exact application id, compared case-insensitively (e.g. `firefox`).
+    pub app_id: Option<&'a str>,
+    /// Substring of the window title, compared case-insensitively.
+    pub title: Option<&'a str>,
+}
+
+impl WindowFilter<'_> {
+    /// Whether this filter selects a window with these attributes. An unset field matches
+    /// anything, so an empty filter matches every window — callers reject that case before
+    /// resolving.
+    fn matches(&self, app_id: &str, title: &str) -> bool {
+        let app_id_ok = self.app_id.is_none_or(|a| app_id.eq_ignore_ascii_case(a));
+        let title_ok = self
+            .title
+            .is_none_or(|s| title.to_lowercase().contains(&s.to_lowercase()));
+        app_id_ok && title_ok
+    }
+
+    /// How to name this filter in an error message.
+    fn describe(&self) -> String {
+        match (self.app_id, self.title) {
+            (Some(a), Some(t)) => format!("app-id '{a}' with title containing '{t}'"),
+            (Some(a), None) => format!("app-id '{a}'"),
+            (None, Some(t)) => format!("title containing '{t}'"),
+            (None, None) => "no window filter".to_string(),
+        }
+    }
+}
+
+/// Resolve a [`WindowFilter`] to exactly one window.
+///
+/// Ambiguity is an error rather than an arbitrary pick: the toplevel list is ordered by
+/// the order the compositor advertised the windows, which is not something a script
+/// should silently depend on. The error lists the candidates so the caller can re-run
+/// with a tighter filter or the identifier.
+pub fn resolve_window<'a>(
+    toplevels: &'a [Toplevel],
+    filter: WindowFilter<'_>,
+) -> Result<&'a Toplevel, CaptureError> {
+    let matches: Vec<&Toplevel> = toplevels
+        .iter()
+        .filter(|t| filter.matches(&t.app_id, &t.title))
+        .collect();
+    match matches.as_slice() {
+        [one] => Ok(one),
+        [] => Err(CaptureError::NoWindowMatches(filter.describe())),
+        many => Err(CaptureError::AmbiguousWindow {
+            selector: filter.describe(),
+            candidates: many
+                .iter()
+                .map(|t| format!("  -w {}\t{}\t{}", t.identifier, t.app_id, t.title))
+                .collect(),
+        }),
+    }
+}
+
+/// Capture the single window matching `filter` (see [`resolve_window`]).
+pub fn capture_matching_window(
+    client: &mut Client,
+    filter: WindowFilter<'_>,
+    budget: Duration,
+) -> Result<CapturedImage, CaptureError> {
+    let tl = resolve_window(client.toplevels(), filter)?.clone();
     frame_to_image(client.capture_toplevel_once(&tl, budget)?)
 }
 
@@ -255,5 +326,58 @@ mod tests {
     fn parse_geometry_bad() {
         assert!(parse_geometry("nonsense").is_err());
         assert!(parse_geometry("1,2 3").is_err());
+    }
+
+    #[test]
+    fn app_id_matches_exactly_and_ignores_case() {
+        let f = WindowFilter {
+            app_id: Some("Firefox"),
+            title: None,
+        };
+        assert!(f.matches("firefox", "Inbox"));
+        assert!(!f.matches("firefox-esr", "Inbox")); // not a substring match
+    }
+
+    #[test]
+    fn title_matches_as_a_case_insensitive_substring() {
+        let f = WindowFilter {
+            app_id: None,
+            title: Some("inbox"),
+        };
+        assert!(f.matches("firefox", "Inbox — Mail"));
+        assert!(!f.matches("firefox", "Drafts"));
+    }
+
+    #[test]
+    fn both_fields_narrow_the_match() {
+        let f = WindowFilter {
+            app_id: Some("firefox"),
+            title: Some("inbox"),
+        };
+        assert!(f.matches("firefox", "Inbox"));
+        assert!(!f.matches("chromium", "Inbox"));
+        assert!(!f.matches("firefox", "Drafts"));
+    }
+
+    #[test]
+    fn describe_names_whichever_fields_are_set() {
+        let app = WindowFilter {
+            app_id: Some("firefox"),
+            title: None,
+        };
+        assert_eq!(app.describe(), "app-id 'firefox'");
+        let title = WindowFilter {
+            app_id: None,
+            title: Some("inbox"),
+        };
+        assert_eq!(title.describe(), "title containing 'inbox'");
+        let both = WindowFilter {
+            app_id: Some("firefox"),
+            title: Some("inbox"),
+        };
+        assert_eq!(
+            both.describe(),
+            "app-id 'firefox' with title containing 'inbox'"
+        );
     }
 }

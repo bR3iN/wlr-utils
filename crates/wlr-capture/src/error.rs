@@ -41,6 +41,20 @@ pub enum CaptureError {
     #[error("window '{0}' not found")]
     WindowNotFound(String),
 
+    /// No window matches the requested `app_id` / title filter.
+    #[error("no window matches {0}")]
+    NoWindowMatches(String),
+
+    /// Several windows match the requested `app_id` / title filter, so the caller has to
+    /// narrow it down. `candidates` describes the matches well enough to pick one.
+    #[error("{selector} matches {} windows:\n{}", .candidates.len(), .candidates.join("\n"))]
+    AmbiguousWindow {
+        /// A human description of the filter that was too loose, e.g. `app-id 'firefox'`.
+        selector: String,
+        /// One pre-formatted line per matching window.
+        candidates: Vec<String>,
+    },
+
     /// A geometry string was not in `X,Y WxH` form.
     #[error("invalid geometry '{0}' (expected 'X,Y WxH')")]
     InvalidGeometry(String),
@@ -156,6 +170,18 @@ mod tests {
             CaptureError::WindowsUnsupported
                 .to_string()
                 .contains("wlroots >= 0.20")
+        );
+    }
+
+    #[test]
+    fn ambiguous_window_lists_every_candidate() {
+        let e = CaptureError::AmbiguousWindow {
+            selector: "app-id 'firefox'".into(),
+            candidates: vec!["  1  firefox  Inbox".into(), "  2  firefox  Docs".into()],
+        };
+        assert_eq!(
+            e.to_string(),
+            "app-id 'firefox' matches 2 windows:\n  1  firefox  Inbox\n  2  firefox  Docs"
         );
     }
 

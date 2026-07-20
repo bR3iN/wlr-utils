@@ -22,10 +22,10 @@ strides, occlusion-independent).
 ## Usage
 
 ```sh
-wlr-shot screenshot [-o NAME | -g GEOM | -w ID | --pick-window]
+wlr-shot screenshot [-o NAME | -g GEOM | -w ID | --app-id ID | --pick-window]
                     [-t png|jpeg|ppm] [-q QUALITY] [-c] [FILE|-]
-wlr-shot screenshot --list-outputs
-wlr-shot record [-o NAME | -g GEOM | -w ID | --pick-window | -s | -a]
+wlr-shot screenshot --list-outputs | --list-windows
+wlr-shot record [-o NAME | -g GEOM | -w ID | --app-id ID | --pick-window | -s | -a]
                 [--encoder auto|nvenc|vaapi|software] [--fps N]
                 [--timelapse INTERVAL] [-d SECS] FILE
 ```
@@ -40,7 +40,13 @@ Source (pick one; defaults to the sole output):
   stitched across every output it covers. Pairs with slurp:
   `wlr-shot screenshot -g "$(slurp)" shot.png`.
 - `-w, --window ID` — a window, by its `ext-foreign-toplevel` identifier (as
-  printed by `wlr-chooser`).
+  printed by `wlr-chooser` or `--list-windows`).
+- `--app-id APP_ID` and/or `--title TEXT` — a window, by application id (exact,
+  case-insensitive) and/or a substring of its title (case-insensitive). The two
+  combine, and unlike the other sources they are **not** mutually exclusive with
+  each other. If more than one window matches, the command fails and lists the
+  candidates rather than picking one arbitrarily — narrow it down, or use the
+  `-w ID` it prints.
 - `--pick-window` — launch `wlr-chooser` to choose the window interactively.
 - `-a, --active-window` — the focused window.
 - `--current-output` — the focused output.
@@ -62,6 +68,8 @@ Encoding & destination:
   `zwlr_data_control_manager_v1`.
 - `FILE` — destination, or `-` for stdout (the default). Ignored with `--clipboard`.
 - `--list-outputs` — print `NAME<TAB>WxH+X,Y` (logical geometry) and exit.
+- `--list-windows` — print `ID<TAB>APP_ID<TAB>TITLE` for every capturable window
+  and exit; the companion to `--app-id`/`--title`.
 
 Because the default `FILE` is `-` (stdout), a screenshot pipes straight into an
 annotation editor — **no temp file**. Example **Sway** bindings sending each source
@@ -87,10 +95,11 @@ Stream a source to a file whose **format follows the extension**: `.mp4`/`.mkv` 
 H.264 video, or **`.gif`/`.webp`** for an animated image (downscaled — GIF to 800 px,
 WebP to 1280 px on the long side — and best used on a **region**, since per-frame GIF
 quantization on a full 4K output is slow). The same source flags as `screenshot` apply — `-o`/sole output,
-`--current-output`, `-w ID`/`--pick-window`, `-a`, `-g`, and `-s` — except a region
-(`-g`/`-s`) records a **single** output for now (the one its top-left corner sits
-on). Recording a **window** (`-w`/`--pick-window`) follows it across workspaces and
-even while occluded.
+`--current-output`, `-w ID`/`--app-id`/`--title`/`--pick-window`, `-a`, `-g`, and `-s` —
+except a region (`-g`/`-s`) records a **single** output for now (the one its top-left
+corner sits on). Recording a **window** follows it across workspaces and even while
+occluded; `--app-id`/`--title` resolve to an identifier once, at start, so a window
+opened later can't steal the recording.
 
 ```sh
 wlr-shot record -o DP-4 out.mp4                 # an output, until Ctrl-C

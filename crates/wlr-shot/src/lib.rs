@@ -63,6 +63,14 @@ struct ShotArgs {
     /// by `wlr-chooser`).
     #[arg(short = 'w', long, value_name = "ID", group = "source")]
     window: Option<String>,
+    /// Capture the window with this application id (exact, case-insensitive) — e.g.
+    /// `firefox`. Combine with `--title` when several windows share an app id.
+    #[arg(long, value_name = "APP_ID", conflicts_with = "source")]
+    app_id: Option<String>,
+    /// Capture the window whose title contains this text (case-insensitive). Usable
+    /// on its own or together with `--app-id`.
+    #[arg(long, value_name = "TEXT", conflicts_with = "source")]
+    title: Option<String>,
     /// Launch `wlr-chooser` to pick a window to capture.
     #[arg(long, group = "source")]
     pick_window: bool,
@@ -93,6 +101,9 @@ struct ShotArgs {
     /// List the available outputs and exit.
     #[arg(long)]
     list_outputs: bool,
+    /// List the capturable windows (identifier, app id, title) and exit.
+    #[arg(long)]
+    list_windows: bool,
     /// Destination file, or `-` for stdout (the default). Ignored with `--clipboard`.
     #[arg(value_name = "FILE", default_value = "-")]
     file: String,
@@ -135,6 +146,16 @@ fn screenshot(args: ShotArgs) -> Result<()> {
         return Ok(());
     }
 
+    if args.list_windows {
+        if !client.can_capture_windows() {
+            return Err(wlr_capture::CaptureError::WindowsUnsupported.into());
+        }
+        for t in client.toplevels() {
+            println!("{}\t{}\t{}", t.identifier, t.app_id, t.title);
+        }
+        return Ok(());
+    }
+
     // Resolve the source (the flags form an exclusive group).
     let img = if args.select {
         // Open the overlay connection BEFORE capturing. Capture can briefly open and
@@ -163,6 +184,8 @@ fn screenshot(args: ShotArgs) -> Result<()> {
         capture::capture_window(&mut client, &pick_window()?, DEFAULT_BUDGET)?
     } else if let Some(id) = &args.window {
         capture::capture_window(&mut client, id, DEFAULT_BUDGET)?
+    } else if let Some(filter) = window_filter(args.app_id.as_deref(), args.title.as_deref()) {
+        capture::capture_matching_window(&mut client, filter, DEFAULT_BUDGET)?
     } else {
         capture::capture_output(&mut client, args.output.as_deref(), DEFAULT_BUDGET)?
     };
@@ -206,6 +229,15 @@ fn clipboard_serve(mime: &str) -> Result<()> {
         .read_to_end(&mut data)
         .context("reading clipboard data")?;
     wlr_capture::clipboard::serve(mime, data).map_err(Into::into)
+}
+
+/// Build a window filter from the `--app-id` / `--title` flags, or `None` when neither
+/// was given (in which case the caller falls back to its default source).
+fn window_filter<'a>(
+    app_id: Option<&'a str>,
+    title: Option<&'a str>,
+) -> Option<capture::WindowFilter<'a>> {
+    (app_id.is_some() || title.is_some()).then_some(capture::WindowFilter { app_id, title })
 }
 
 /// The active window's logical rectangle, via compositor focus IPC.
@@ -483,6 +515,14 @@ mod record_impl {
         /// across workspaces and even when occluded.
         #[arg(short = 'w', long, value_name = "ID", group = "source")]
         window: Option<String>,
+        /// Record the window with this application id (exact, case-insensitive) — e.g.
+        /// `firefox`. Combine with `--title` when several windows share an app id.
+        #[arg(long, value_name = "APP_ID", conflicts_with = "source")]
+        app_id: Option<String>,
+        /// Record the window whose title contains this text (case-insensitive). Usable
+        /// on its own or together with `--app-id`.
+        #[arg(long, value_name = "TEXT", conflicts_with = "source")]
+        title: Option<String>,
         /// Launch `wlr-chooser` to pick a window to record.
         #[arg(long, group = "source")]
         pick_window: bool,
@@ -642,6 +682,15 @@ mod record_impl {
             region_target(client, active_window_rect()?)
         } else if let Some(id) = &args.window {
             Ok(Target::Window(id.clone()))
+        } else if let Some(filter) =
+            crate::window_filter(args.app_id.as_deref(), args.title.as_deref())
+        {
+            // Resolve once, up front: recording then follows that identifier, so a window
+            // opened mid-recording can't change what we are pointed at.
+            let id = capture::resolve_window(client.toplevels(), filter)?
+                .identifier
+                .clone();
+            Ok(Target::Window(id))
         } else if args.pick_window {
             Ok(Target::Window(pick_window()?))
         } else {

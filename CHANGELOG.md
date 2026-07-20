@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format is based on
 
 ## Unreleased
 
+### Added
+
+- **`wlr-shot --app-id` / `--title`** — target a window by application id and/or title
+  substring, on `screenshot` and `record`; an ambiguous filter lists the candidates.
+  `screenshot --list-windows` prints the identifier, app id and title of each window.
+
 ### Fixed
 
 - **`wlr-draw` output hotplug** — the daemon no longer quits when an output is unplugged,
