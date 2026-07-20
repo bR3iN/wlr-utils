@@ -87,6 +87,7 @@ $ wlr-peek mirror                  # no source: launch wlr-chooser to pick a win
 $ wlr-peek mirror <ID>             # mirror a window (ID as printed by wlr-chooser)
 $ wlr-peek mirror -w               # pick a window via the chooser (explicit)
 $ wlr-peek mirror -s               # select a region with the mouse, then mirror it
+$ wlr-peek mirror --app-id firefox # mirror a window by application id
 $ wlr-peek mirror -o DP-4          # mirror a whole output / screen
 $ wlr-peek mirror --current-output # the focused output
 $ wlr-peek mirror -a               # the active window's area (needs focus info)
@@ -94,8 +95,8 @@ $ wlr-peek mirror -g "100,200 640x480" --zoom 4   # a fixed region, magnified
 ```
 
 It takes the **same source flags as the rest of wlr-utils**: a window (`id`,
-`-w`/`--pick-window`, `-a`/`--active-window`), or a region/output mirrored as a live
-loupe (`-s` interactive, `-g "X,Y WxH"`, `-o NAME`, `--current-output`), magnified by
+`--app-id`/`--title`, `-w`/`--pick-window`, `-a`/`--active-window`), or a region/output
+mirrored as a live loupe (`-s`, `-g "X,Y WxH"`, `-o NAME`, `--current-output`), magnified by
 `--zoom` (default ×2). Region/output mode is mono-output for now (clipped to the output
 its top-left corner sits on). Keep the window outside the mirrored region to avoid
 feedback.
@@ -131,12 +132,12 @@ $ grim -g "$(wlr-peek region)" shot.png        # feed any slurp-compatible tool
 
 Streams a source and fires when its content **changes**, or once it goes **idle**
 (stops changing). Same sources as the other tools: `-s` (interactive region), `-g`,
-`-o`, `--current-output`, `-w`/`--pick-window`, `-a` (a region is single-output, like
-`mirror`/`record`).
+`-o`, `--current-output`, `-w`/`--app-id`/`--title`/`--pick-window`, `-a` (a region is
+single-output, like `mirror`/`record`).
 
 ```console
 $ wlr-peek watch -g "$(slurp)" && notify-send "it changed"   # fire once, then notify
-$ wlr-peek watch -w "$ID" --on idle --for 5s                 # wake when the window settles
+$ wlr-peek watch --app-id thunderbird --on idle --for 5s     # wake when the window settles
 $ wlr-peek watch -o DP-4 --on change --threshold 2 --repeat --exec 'mpc next'
 ```
 

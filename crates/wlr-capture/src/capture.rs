@@ -78,6 +78,14 @@ pub struct WindowFilter<'a> {
     pub title: Option<&'a str>,
 }
 
+impl<'a> WindowFilter<'a> {
+    /// Build a filter from a pair of optional CLI flags, or `None` when neither was given
+    /// (the caller then falls back to its own default source).
+    pub fn from_flags(app_id: Option<&'a str>, title: Option<&'a str>) -> Option<Self> {
+        (app_id.is_some() || title.is_some()).then_some(Self { app_id, title })
+    }
+}
+
 impl WindowFilter<'_> {
     /// Whether this filter selects a window with these attributes. An unset field matches
     /// anything, so an empty filter matches every window — callers reject that case before

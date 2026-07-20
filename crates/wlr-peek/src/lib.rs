@@ -210,6 +210,14 @@ struct MirrorArgs {
     /// Mirror this whole named output / screen (e.g. `DP-4`).
     #[arg(short = 'o', long, value_name = "NAME", group = "source")]
     output: Option<String>,
+    /// Mirror the window with this application id (exact, case-insensitive) — e.g.
+    /// `firefox`. Combine with `--title` when several windows share an app id.
+    #[arg(long, value_name = "APP_ID", conflicts_with = "source")]
+    app_id: Option<String>,
+    /// Mirror the window whose title contains this text (case-insensitive). Usable
+    /// on its own or together with `--app-id`.
+    #[arg(long, value_name = "TEXT", conflicts_with = "source")]
+    title: Option<String>,
     /// Pick a window to mirror via the chooser (same as no source flag).
     #[arg(short = 'w', long = "pick-window", group = "source")]
     pick_window: bool,
@@ -266,13 +274,19 @@ fn mirror(args: MirrorArgs) -> Result<()> {
     if let Some(region) = resolve_mirror_region(&args)? {
         return mirror_region(region, args.zoom, args.follow);
     }
-    // Otherwise a window: an explicit id, else the chooser (incl. `-w`).
+    // Otherwise a window: an explicit id, an `--app-id`/`--title` match, else the
+    // chooser (incl. `-w`).
     let id = match args.id {
         Some(id) => id,
-        None => match pick_via_chooser() {
-            Some(id) => id,
-            None => std::process::exit(1), // cancelled or chooser unavailable
-        },
+        None => {
+            match capture::WindowFilter::from_flags(args.app_id.as_deref(), args.title.as_deref()) {
+                Some(filter) => resolve_window_id(filter)?,
+                None => match pick_via_chooser() {
+                    Some(id) => id,
+                    None => std::process::exit(1), // cancelled or chooser unavailable
+                },
+            }
+        }
     };
     let _lock = match mirror_lock(&id) {
         Some(lock) => lock,
@@ -314,6 +328,16 @@ fn resolve_mirror_region(args: &MirrorArgs) -> Result<Option<Region>> {
         }
     }
     Ok(None)
+}
+
+/// The identifier of the single window matching `filter`. The connection is short-lived
+/// on purpose: the caller goes on to open its own (see [`output_rect`]).
+fn resolve_window_id(filter: capture::WindowFilter<'_>) -> Result<String> {
+    let mut client = wl::Client::connect().context("Wayland connection")?;
+    client.refresh().ok();
+    Ok(capture::resolve_window(client.toplevels(), filter)?
+        .identifier
+        .clone())
 }
 
 /// The logical rectangle of the named output, as a [`Region`].
@@ -911,6 +935,14 @@ mod watch_impl {
         /// Watch the window with this `ext-foreign-toplevel` identifier.
         #[arg(short = 'w', long, value_name = "ID", group = "source")]
         window: Option<String>,
+        /// Watch the window with this application id (exact, case-insensitive) — e.g.
+        /// `firefox`. Combine with `--title` when several windows share an app id.
+        #[arg(long, value_name = "APP_ID", conflicts_with = "source")]
+        app_id: Option<String>,
+        /// Watch the window whose title contains this text (case-insensitive). Usable
+        /// on its own or together with `--app-id`.
+        #[arg(long, value_name = "TEXT", conflicts_with = "source")]
+        title: Option<String>,
         /// Launch `wlr-chooser` to pick a window to watch.
         #[arg(long, group = "source")]
         pick_window: bool,
@@ -1104,6 +1136,16 @@ mod watch_impl {
             region_target(client, active_window_rect()?)
         } else if let Some(id) = &args.window {
             Ok(Target::Window(id.clone()))
+        } else if let Some(filter) =
+            capture::WindowFilter::from_flags(args.app_id.as_deref(), args.title.as_deref())
+        {
+            // Resolve once, up front: the watch then follows that identifier, so a window
+            // opened mid-run can't change what is being watched.
+            Ok(Target::Window(
+                capture::resolve_window(client.toplevels(), filter)?
+                    .identifier
+                    .clone(),
+            ))
         } else if args.pick_window {
             Ok(Target::Window(
                 pick_via_chooser().context("no window picked")?,

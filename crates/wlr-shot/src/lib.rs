@@ -184,7 +184,9 @@ fn screenshot(args: ShotArgs) -> Result<()> {
         capture::capture_window(&mut client, &pick_window()?, DEFAULT_BUDGET)?
     } else if let Some(id) = &args.window {
         capture::capture_window(&mut client, id, DEFAULT_BUDGET)?
-    } else if let Some(filter) = window_filter(args.app_id.as_deref(), args.title.as_deref()) {
+    } else if let Some(filter) =
+        capture::WindowFilter::from_flags(args.app_id.as_deref(), args.title.as_deref())
+    {
         capture::capture_matching_window(&mut client, filter, DEFAULT_BUDGET)?
     } else {
         capture::capture_output(&mut client, args.output.as_deref(), DEFAULT_BUDGET)?
@@ -229,15 +231,6 @@ fn clipboard_serve(mime: &str) -> Result<()> {
         .read_to_end(&mut data)
         .context("reading clipboard data")?;
     wlr_capture::clipboard::serve(mime, data).map_err(Into::into)
-}
-
-/// Build a window filter from the `--app-id` / `--title` flags, or `None` when neither
-/// was given (in which case the caller falls back to its default source).
-fn window_filter<'a>(
-    app_id: Option<&'a str>,
-    title: Option<&'a str>,
-) -> Option<capture::WindowFilter<'a>> {
-    (app_id.is_some() || title.is_some()).then_some(capture::WindowFilter { app_id, title })
 }
 
 /// The active window's logical rectangle, via compositor focus IPC.
@@ -683,7 +676,7 @@ mod record_impl {
         } else if let Some(id) = &args.window {
             Ok(Target::Window(id.clone()))
         } else if let Some(filter) =
-            crate::window_filter(args.app_id.as_deref(), args.title.as_deref())
+            capture::WindowFilter::from_flags(args.app_id.as_deref(), args.title.as_deref())
         {
             // Resolve once, up front: recording then follows that identifier, so a window
             // opened mid-recording can't change what we are pointed at.
