@@ -9,7 +9,7 @@ All notable changes to this project are documented here. The format is based on
 ### Added
 
 - **`--app-id` / `--title`** — target a window by application id and/or title substring
-  on `wlr-shot screenshot`/`record` and `wlr-peek mirror`/`watch`; an ambiguous filter
+  on `wlr-shot screenshot`/`record` and `wlr-peek mirror`/`watch`/`ocr`; an ambiguous filter
   lists the candidates. `wlr-shot screenshot --list-windows` prints the identifier, app
   id and title of each window.
 

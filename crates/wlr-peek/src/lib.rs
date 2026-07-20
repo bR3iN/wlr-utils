@@ -602,6 +602,15 @@ struct OcrArgs {
     /// OCR this whole named output (e.g. `DP-4`).
     #[arg(short = 'o', long, value_name = "NAME", group = "source")]
     output: Option<String>,
+    /// OCR the window with this application id (exact, case-insensitive) — e.g.
+    /// `firefox`. Reads the window itself, so it works even occluded or off-workspace.
+    /// Combine with `--title` when several windows share an app id.
+    #[arg(long, value_name = "APP_ID", conflicts_with = "source")]
+    app_id: Option<String>,
+    /// OCR the window whose title contains this text (case-insensitive). Usable on
+    /// its own or together with `--app-id`.
+    #[arg(long, value_name = "TEXT", conflicts_with = "source")]
+    title: Option<String>,
     /// OCR the active (focused) window — needs compositor focus info.
     #[arg(short = 'a', long, group = "source")]
     active_window: bool,
@@ -644,6 +653,10 @@ fn ocr_source(client: &mut wl::Client, args: &OcrArgs) -> Result<wl::CapturedIma
             .map_err(Into::into)
     } else if let Some(name) = &args.output {
         capture::capture_output(client, Some(name), DEFAULT_BUDGET).map_err(Into::into)
+    } else if let Some(filter) =
+        capture::WindowFilter::from_flags(args.app_id.as_deref(), args.title.as_deref())
+    {
+        capture::capture_matching_window(client, filter, DEFAULT_BUDGET).map_err(Into::into)
     } else if args.active_window {
         capture::capture_region(client, active_window_rect()?, DEFAULT_BUDGET).map_err(Into::into)
     } else if args.current_output {

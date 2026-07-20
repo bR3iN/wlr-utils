@@ -51,11 +51,15 @@ Captures a source and runs it through Tesseract, printing the recognised text.
 $ wlr-peek ocr                    # select a region interactively (default)
 $ wlr-peek ocr -g "100,200 640x480"
 $ wlr-peek ocr --active-window     # OCR the focused window (needs compositor IPC)
+$ wlr-peek ocr --app-id firefox    # OCR a window by app id — even occluded
 $ wlr-peek ocr -l fra+eng -c       # French+English, copy to the clipboard
 ```
 
 With no source flag it selects a region interactively (the default). Other sources
-mirror `wlr-shot`: `-g "X,Y WxH"`, `-o NAME`, `-a/--active-window`, `--current-output`.
+mirror `wlr-shot`: `-g "X,Y WxH"`, `-o NAME`, `--app-id`/`--title`, `-a/--active-window`,
+`--current-output`. `--app-id`/`--title` capture the **window itself**, so they read a
+window that is occluded or on another workspace — unlike `-a`, which captures the screen
+area the focused window occupies.
 `-l/--lang` picks the Tesseract language(s) (default `eng`; the matching
 `tesseract-ocr-<lang>` data pack must be installed).
 
@@ -166,6 +170,12 @@ $ wlr-peek grep -g "$(slurp)" -i error      # case-insensitive, in a region
 Sources: `-g`, `-o`, `-a`, `--current-output`, or (default) an interactive region.
 Matching is a substring (`-i` for case-insensitive); coordinates map back to a single
 output. Exits 1 when nothing matches, like `grep`.
+
+Unlike the other subcommands, `grep` has **no `--app-id`/`--title` window source** — by
+design. Its output is a position in the global logical space, and a foreign-toplevel
+capture carries no such position (that is exactly why it can read an occluded or
+off-workspace window). Coordinates for a window source would be window-local and
+silently incompatible with the rest of the output. Use `ocr --app-id` for the text.
 
 ## Requirements
 
