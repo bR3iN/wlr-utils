@@ -1,23 +1,34 @@
 # Maintainer: Stéphane Jourdois <stephane@jourdois.fr>
-# Rename to PKGBUILD when publishing the wlr-chooser-bin AUR package.
-pkgname=wlr-chooser-bin
-_pkgname=wlr-chooser
-pkgver=1.0.0
+# Rename to PKGBUILD when publishing the wlr-utils-bin AUR package.
+pkgname=wlr-utils-bin
+pkgver=1.4.0
 pkgrel=1
-pkgdesc='Graphical window & screen picker for wlroots screencast portals (prebuilt binary)'
+pkgdesc='Native screen tools for wlroots compositors: pick, switch, capture, inspect and annotate (prebuilt binaries)'
 arch=('x86_64')
-url='https://github.com/sjourdois/wlr-chooser'
+url='https://github.com/sjourdois/wlr-utils'
 license=('MIT' 'Apache-2.0')
-depends=('wayland' 'libxkbcommon' 'fontconfig' 'libglvnd')
-optdepends=('noto-fonts-cjk: render CJK (Japanese/Chinese/Korean) text')
-provides=("$_pkgname")
-conflicts=("$_pkgname")
-_archive="$_pkgname-x86_64-unknown-linux-gnu"
+# Same runtime libraries as the source package; the prebuilt binaries link them
+# dynamically, so soname skew with your system may require the -from-source package.
+depends=('wayland' 'libxkbcommon' 'fontconfig' 'libglvnd' 'mesa' 'ffmpeg' 'libva'
+         'libpipewire' 'tesseract' 'leptonica' 'dbus')
+optdepends=('noto-fonts-cjk: render CJK (Japanese/Chinese/Korean) text'
+            'tesseract-data-eng: English OCR for `wlr-peek ocr`'
+            'tesseract-data-fra: French OCR for `wlr-peek ocr`'
+            'xdg-desktop-portal-wlr: screencast portal that drives wlr-chooser')
+provides=('wlr-utils')
+conflicts=('wlr-utils')
+_archive="wlr-utils-x86_64-unknown-linux-gnu"
 source=("$_archive-$pkgver.tar.xz::$url/releases/download/v$pkgver/$_archive.tar.xz")
 sha256sums=('SKIP') # run `updpkgsums` to fill before publishing
 
 package() {
-	# cargo-dist archives contain the binary inside a top-level <target> directory.
-	install -Dm755 "$_archive/$_pkgname" "$pkgdir/usr/bin/$_pkgname"
-	install -Dm644 "$_archive/README.md" "$pkgdir/usr/share/doc/$_pkgname/README.md" 2>/dev/null || true
+	# The cargo-dist archive unpacks into a single top-level directory named after
+	# the target triple, holding the five binaries plus the READMEs and licences.
+	cd "$_archive"
+	for _bin in wlr-chooser wlr-switcher wlr-peek wlr-shot wlr-draw; do
+		install -Dm755 "$_bin" "$pkgdir/usr/bin/$_bin"
+	done
+	install -Dm644 README.md "$pkgdir/usr/share/doc/wlr-utils/README.md"
+	install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
+	install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"
 }

@@ -1,14 +1,21 @@
 # Maintainer: Stéphane Jourdois <stephane@jourdois.fr>
-pkgname=wlr-chooser
-pkgver=1.0.0
+pkgname=wlr-utils
+pkgver=1.4.0
 pkgrel=1
-pkgdesc='Graphical window & screen picker for wlroots screencast portals (xdg-desktop-portal-wlr)'
+pkgdesc='Native screen tools for wlroots compositors: pick, switch, capture, inspect and annotate — one capture engine'
 arch=('x86_64')
-url='https://github.com/sjourdois/wlr-chooser'
+url='https://github.com/sjourdois/wlr-utils'
 license=('MIT' 'Apache-2.0')
-depends=('wayland' 'libxkbcommon' 'fontconfig' 'libglvnd')
-optdepends=('noto-fonts-cjk: render CJK (Japanese/Chinese/Korean) text')
-makedepends=('cargo')
+# The whole suite: EGL/GLES + Wayland + fonts for every tool, libgbm for the
+# zero-copy capture path, FFmpeg/VAAPI for wlr-shot recording, PipeWire for its
+# audio track, Tesseract/Leptonica for wlr-peek OCR, and D-Bus for wlr-draw's tray.
+depends=('wayland' 'libxkbcommon' 'fontconfig' 'libglvnd' 'mesa' 'ffmpeg' 'libva'
+         'libpipewire' 'tesseract' 'leptonica' 'dbus')
+makedepends=('cargo' 'clang')
+optdepends=('noto-fonts-cjk: render CJK (Japanese/Chinese/Korean) text'
+            'tesseract-data-eng: English OCR for `wlr-peek ocr`'
+            'tesseract-data-fra: French OCR for `wlr-peek ocr`'
+            'xdg-desktop-portal-wlr: screencast portal that drives wlr-chooser')
 source=("$pkgname-$pkgver.tar.gz::$url/archive/refs/tags/v$pkgver.tar.gz")
 sha256sums=('SKIP') # run `updpkgsums` to fill before publishing
 
@@ -22,18 +29,22 @@ build() {
 	cd "$pkgname-$pkgver"
 	export RUSTUP_TOOLCHAIN=stable
 	export CARGO_TARGET_DIR=target
-	cargo build --frozen --release
+	# The `wlr-utils` bundle crate builds all five binaries in one shot (it is kept
+	# out of the workspace default set, so it must be named explicitly).
+	cargo build --frozen --release -p wlr-utils
 }
 
 check() {
 	cd "$pkgname-$pkgver"
 	export RUSTUP_TOOLCHAIN=stable
-	cargo test --frozen --release
+	cargo test --frozen --release --workspace
 }
 
 package() {
 	cd "$pkgname-$pkgver"
-	install -Dm755 "target/release/$pkgname" "$pkgdir/usr/bin/$pkgname"
+	for _bin in wlr-chooser wlr-switcher wlr-peek wlr-shot wlr-draw; do
+		install -Dm755 "target/release/$_bin" "$pkgdir/usr/bin/$_bin"
+	done
 	install -Dm644 README.md "$pkgdir/usr/share/doc/$pkgname/README.md"
 	install -Dm644 LICENSE-MIT "$pkgdir/usr/share/licenses/$pkgname/LICENSE-MIT"
 	install -Dm644 LICENSE-APACHE "$pkgdir/usr/share/licenses/$pkgname/LICENSE-APACHE"

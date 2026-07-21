@@ -12,6 +12,8 @@ All notable changes to this project are documented here. The format is based on
   on `wlr-shot screenshot`/`record` and `wlr-peek mirror`/`watch`/`ocr`; an ambiguous filter
   lists the candidates. `wlr-shot screenshot --list-windows` prints the identifier, app
   id and title of each window.
+- **Arch Linux (AUR)** — the suite is now packaged on the AUR: `wlr-utils` (built from
+  source) and `wlr-utils-bin` (prebuilt binaries).
 
 ### Fixed
 
