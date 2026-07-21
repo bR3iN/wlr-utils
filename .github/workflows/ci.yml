@@ -34,9 +34,9 @@ jobs:
         run: cargo clippy --all-targets -- -D warnings
       - name: Tests
         run: cargo test
-      - name: Build
-        run: cargo build --release --locked
-      - name: Build the wlr-utils bundle
-        # The bundle is excluded from default-members (it re-declares every tool's binary),
-        # so build it explicitly to catch entrypoint regressions.
-        run: cargo build --release --locked -p wlr-utils
+      - name: Check the wlr-utils bundle
+        # clippy + tests already compile everything in debug; release-mode builds are
+        # left to the release pipeline (cargo-dist / cargo-deb). The bundle is excluded
+        # from default-members (it re-declares every tool's binary), so check it
+        # explicitly to catch entrypoint regressions and keep the Cargo.lock gate.
+        run: cargo check --locked -p wlr-utils
