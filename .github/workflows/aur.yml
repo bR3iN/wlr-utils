@@ -93,13 +93,16 @@ jobs:
           install -dm700 ~/.ssh
           printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null || true
+          # A dedicated deploy key to a known host in ephemeral CI: skip host-key
+          # verification outright rather than fight ssh-keyscan (which left a
+          # conflicting entry and kept failing verification).
           cat > ~/.ssh/config <<'EOF'
           Host aur.archlinux.org
             User aur
             IdentityFile ~/.ssh/aur
             IdentitiesOnly yes
-            StrictHostKeyChecking accept-new
+            StrictHostKeyChecking no
+            UserKnownHostsFile /dev/null
           EOF
 
       - name: Push to the AUR

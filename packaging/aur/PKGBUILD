@@ -29,6 +29,10 @@ build() {
 	cd "$pkgname-$pkgver"
 	export RUSTUP_TOOLCHAIN=stable
 	export CARGO_TARGET_DIR=target
+	# Arch's rustc links with lld, which can't resolve the vendored static libwebp
+	# (WebPAnimEncoder*/WebPMux* come out undefined); fall back to GNU ld, as on the
+	# Debian build where the same code links cleanly.
+	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=bfd"
 	# The `wlr-utils` bundle crate builds all five binaries in one shot (it is kept
 	# out of the workspace default set, so it must be named explicitly).
 	cargo build --frozen --release -p wlr-utils
