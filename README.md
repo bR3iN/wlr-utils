@@ -93,6 +93,15 @@ cargo install wlr-shot           # screenshots + recording
 cargo install wlr-draw           # annotation overlay
 ```
 
+**Arch Linux (AUR)** — two packages, install with any helper (`paru`, `yay`, …):
+
+```sh
+paru -S wlr-utils-bin    # prebuilt binaries from the release (fast)
+paru -S wlr-utils        # …or build the whole suite from source
+```
+
+Both ship the same five tools and conflict with each other; pick one.
+
 **Debian / Ubuntu `.deb`** — a single package with the whole suite is attached to every
 release, built **per distro** so it links against that distro's FFmpeg / Leptonica. Pick the
 one matching your system:
