@@ -1,18 +1,20 @@
 name: aur
 
 # Publish the AUR packages (wlr-utils from source, wlr-utils-bin from the
-# cargo-dist archive) when a release is published. Runs in an Arch container so
+# cargo-dist archive) on a release tag. Runs in an Arch container so
 # makepkg/updpkgsums/makepkg --printsrcinfo are available. The push uses a
 # dedicated AUR deploy key (secret AUR_SSH_KEY) whose public half is registered
 # on the AUR account — the maintainer's personal signing key never enters CI.
 #
-# It triggers on `release: published` so the -bin archive already exists; the
-# source package only needs the git tag. Without AUR_SSH_KEY set, it still
-# builds and validates each package but skips the push.
+# It triggers on the tag push (a GITHUB_TOKEN-created release does not emit a
+# `release: published` event, so this can't key off that). The -bin package waits
+# for the cargo-dist archive to be uploaded first; the source package only needs
+# the git tag. Without AUR_SSH_KEY set, it still builds and validates each package
+# but skips the push.
 
 on:
-  release:
-    types: [published]
+  push:
+    tags: ['v*']
   workflow_dispatch:
     inputs:
       tag:
@@ -39,12 +41,22 @@ jobs:
       - name: Resolve the release version
         id: ver
         run: |
-          tag="${{ github.event.release.tag_name || github.event.inputs.tag }}"
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           echo "pkgver=${tag#v}" >>"$GITHUB_OUTPUT"
 
       - name: Install tooling
-        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib rust clang
+        run: pacman -Syu --noconfirm --needed git openssh pacman-contrib rust clang curl
+
+      - name: Wait for the release archive (bin package)
+        if: matrix.name == 'wlr-utils-bin'
+        run: |
+          url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/wlr-utils-x86_64-unknown-linux-gnu.tar.xz"
+          for _ in $(seq 1 40); do
+            curl -sfI "$url" >/dev/null && exit 0
+            echo "waiting for $url…"; sleep 30
+          done
+          echo "release archive still missing after waiting" >&2; exit 1
 
       - uses: actions/checkout@v4
 

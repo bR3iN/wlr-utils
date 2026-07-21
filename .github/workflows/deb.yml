@@ -3,6 +3,11 @@ name: Debian package
 on:
   push:
     tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to build the .debs for and attach them to
+        required: true
 
 permissions:
   contents: write
@@ -87,7 +92,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -eux
-          tag="${GITHUB_REF_NAME}"
+          tag="${{ github.event.inputs.tag || github.ref_name }}"
           # the cargo-dist release job creates the release; wait for it.
           for _ in $(seq 1 30); do
             gh release view "$tag" >/dev/null 2>&1 && break

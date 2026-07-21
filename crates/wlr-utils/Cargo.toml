@@ -83,7 +83,7 @@ assets = [
 # Audio-less build for hosts whose PipeWire is too old to link libspa (Ubuntu 22.04).
 # Same package name; only the description flags the missing system-audio track. Built
 # with `cargo deb --variant no-audio --no-default-features`.
-[package.metadata.deb.variant.no-audio]
+[package.metadata.deb.variants.no-audio]
 name = "wlr-utils"
 extended-description = """\
 The wlr-utils suite in one package: wlr-chooser (screen-share picker), wlr-switcher \
