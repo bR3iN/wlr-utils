@@ -35,13 +35,22 @@ path = "src/bin/wlr-shot.rs"
 name = "wlr-draw"
 path = "src/bin/wlr-draw.rs"
 
+# The bundle is the full-featured build by default. `audio` (native PipeWire) is the
+# only toggle: drop it (`--no-default-features`) on a host whose PipeWire is too old to
+# link libspa — e.g. the Ubuntu 22.04 .deb, which then records video without a
+# system-audio track. wlr-shot's other defaults (i18n, video) stay on regardless.
+[features]
+default = ["audio"]
+audio = ["wlr-shot/audio"]
+
 [dependencies]
 # Each tool with its default features, so the bundle is the full-featured build
 # (GPU capture, OCR, video+audio recording, tray). Pull a single tool instead for a
-# lighter footprint: `cargo install wlr-shot`, etc.
+# lighter footprint: `cargo install wlr-shot`, etc. wlr-shot's `audio` is gated behind
+# this crate's `audio` feature (above) so a .deb can be built without it.
 wlr-chooser = { path = "../wlr-chooser", version = "1.4.0" }
 wlr-peek = { path = "../wlr-peek", version = "1.4.0" }
-wlr-shot = { path = "../wlr-shot", version = "1.4.0" }
+wlr-shot = { path = "../wlr-shot", version = "1.4.0", default-features = false, features = ["i18n", "video"] }
 wlr-draw = { path = "../wlr-draw", version = "1.4.0" }
 anyhow.workspace = true
 
@@ -70,3 +79,16 @@ assets = [
     ["../../target/release/wlr-draw", "usr/bin/", "755"],
     ["README.md", "usr/share/doc/wlr-utils/README.md", "644"],
 ]
+
+# Audio-less build for hosts whose PipeWire is too old to link libspa (Ubuntu 22.04).
+# Same package name; only the description flags the missing system-audio track. Built
+# with `cargo deb --variant no-audio --no-default-features`.
+[package.metadata.deb.variant.no-audio]
+name = "wlr-utils"
+extended-description = """\
+The wlr-utils suite in one package: wlr-chooser (screen-share picker), wlr-switcher \
+(Alt-Tab/exposé), wlr-peek (colour picker, loupe, OCR, live mirror, watch, visual grep), \
+wlr-shot (screenshots and recording) and wlr-draw (on-screen annotation overlay) — native \
+screen tools for wlroots compositors, sharing one capture engine. This build records \
+video without a system-audio track (this distribution's PipeWire is too old to link it); \
+for audio recording, install with `cargo install wlr-utils` or the prebuilt tarball."""

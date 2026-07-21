@@ -24,9 +24,10 @@ jobs:
           - { image: 'debian:trixie-slim',   codename: trixie,      experimental: false }
           - { image: 'debian:forky-slim',    codename: forky,       experimental: true  }
           - { image: 'debian:sid-slim',      codename: sid,         experimental: true  }
-          # Ubuntu 22.04 (jammy) is intentionally excluded: its PipeWire is too old for
-          # the `libspa` crate the `audio` feature needs (missing spa_meta_* symbols), so
-          # the build can't link. 22.04 users install via `cargo install` or the tarball.
+          # Ubuntu 22.04 (jammy): its PipeWire is too old for the `libspa` crate the
+          # `audio` feature needs (missing spa_meta_* symbols), so build without audio —
+          # the .deb records video only, and its description says so.
+          - { image: 'ubuntu:22.04',         codename: jammy,       experimental: false, debargs: '--no-default-features --variant no-audio' }
           - { image: 'ubuntu:24.04',         codename: noble,       experimental: false }
           - { image: 'ubuntu:26.04',         codename: ubuntu2604,  experimental: true  }
     continue-on-error: ${{ matrix.experimental }}
@@ -51,7 +52,7 @@ jobs:
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
       - name: Build the .deb (one bundle package with every binary)
-        run: cargo deb -p wlr-utils
+        run: cargo deb -p wlr-utils ${{ matrix.debargs }}
       - name: Tag the artifact with its distro codename
         run: |
           set -eux
