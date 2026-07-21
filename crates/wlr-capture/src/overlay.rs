@@ -12,8 +12,7 @@ use crate::render::Gpu;
 use crate::wl::Region;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState},
-    delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
-    delegate_registry, delegate_seat,
+    delegate_dispatch2, delegate_registry,
     output::{OutputHandler, OutputState},
     registry::{ProvidesRegistryState, RegistryState},
     registry_handlers,
@@ -1014,10 +1013,5 @@ impl ProvidesRegistryState for State {
     registry_handlers![OutputState, SeatState];
 }
 
-delegate_compositor!(State);
-delegate_output!(State);
-delegate_seat!(State);
-delegate_keyboard!(State);
-delegate_pointer!(State);
-delegate_layer!(State);
+delegate_dispatch2!(State);
 delegate_registry!(State);

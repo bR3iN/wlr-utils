@@ -23,9 +23,8 @@ use crate::model::{Color, Document, Element, Recognized, ShapeKind, Tool, constr
 use crate::proto::Cmd;
 use crate::tr;
 use smithay_client_toolkit::{
-    compositor::{CompositorHandler, CompositorState, Region},
-    delegate_compositor, delegate_keyboard, delegate_layer, delegate_output, delegate_pointer,
-    delegate_registry, delegate_seat,
+    compositor::{CompositorHandler, CompositorState, FrameCallbackData, Region},
+    delegate_dispatch2, delegate_registry,
     output::{OutputHandler, OutputState},
     reexports::calloop::channel::{Channel, Event as ChannelEvent, channel},
     reexports::calloop::{EventLoop, LoopHandle},
@@ -168,7 +167,7 @@ impl Surface {
         // Ask for the frame callback before presenting: `eglSwapBuffers` commits the
         // surface itself, so the request has to be queued to ride along with that commit.
         let wl_surface = self.layer.wl_surface().clone();
-        wl_surface.frame(qh, wl_surface.clone());
+        wl_surface.frame(qh, FrameCallbackData(wl_surface.clone()));
         gpu.render(
             &self.egui_ctx,
             raw_input,
@@ -2635,12 +2634,7 @@ impl ProvidesRegistryState for State {
     registry_handlers![OutputState, SeatState];
 }
 
-delegate_compositor!(State);
-delegate_output!(State);
-delegate_seat!(State);
-delegate_keyboard!(State);
-delegate_pointer!(State);
-delegate_layer!(State);
+delegate_dispatch2!(State);
 delegate_registry!(State);
 
 #[cfg(test)]
