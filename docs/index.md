@@ -20,11 +20,64 @@ layout: default
 
 <p class="lead">Five sharp tools. One capture engine.<br>Pick · switch · capture · inspect · draw.</p>
 
+<p style="text-align:center;max-width:660px;margin:0 auto 1.4rem;font-size:1.05rem;line-height:1.5">
+<strong>Name a window — even one you can't see.</strong> Screenshot, record, mirror, OCR or
+watch any window by app id or title, occluded behind others or parked on another
+workspace. No clicking, no workspace-hopping — and it scripts.</p>
+
 <p style="text-align:center">
 <a class="btn" href="https://github.com/sjourdois/wlr-utils">Source on GitHub</a>
 &nbsp;
 <a class="btn" href="https://github.com/sjourdois/wlr-utils/blob/main/COMPATIBILITY.md">Compatibility</a>
 </p>
+
+---
+
+## wlr-chooser — pick a window or screen
+
+**Share the right window.** A rofi-like picker with live thumbnails for the
+screencast portal — pick from live previews, not a text list.
+
+<img src="assets/wlr-chooser/picker.png" width="900">
+
+---
+
+## wlr-switcher — Alt-Tab & exposé with live previews
+
+**Alt-Tab with live previews.** The exposé reveals windows from *other
+workspaces* — even occluded ones. Real moving thumbnails, not icons.
+
+<video src="assets/wlr-switcher/altab.mp4" autoplay loop muted playsinline width="49%"></video>
+<video src="assets/wlr-switcher/expose.mp4" autoplay loop muted playsinline width="49%"></video>
+
+```sh
+# A true Alt-Tab: bind it to a held modifier.
+bindsym Mod1+Tab exec wlr-switcher
+```
+
+---
+
+## wlr-shot — capture the screen
+
+**Screenshot or record anything.** Region, window or whole output → PNG/JPEG,
+or H.264 / GIF — with **system audio** and **timelapse**.
+
+Target a window **by name** (`--app-id`/`--title`) — even hidden, on another
+workspace, or behind a lock screen. It grabs the window itself, not the visible
+pixels, so there's no need to raise it first.
+
+Whole-screen grabbers like `grim` shoot the visible output — so they miss what
+isn't on it: occluded or unmapped windows, overlays, other workspaces.
+
+Below: the frozen region selector.
+
+<video src="assets/wlr-shot/select.mp4" autoplay loop muted playsinline width="900"></video>
+
+```sh
+wlr-shot screenshot -s out.png            # drag a region on a frozen screen
+wlr-shot screenshot --app-id firefox out.png   # a window by name — even hidden or locked
+wlr-shot record -o DP-1 --audio out.mp4
+```
 
 ---
 
@@ -47,48 +100,13 @@ wlr-draw toggle     # toggle draw mode (bind it to a hotkey)
 
 ---
 
-## wlr-switcher — Alt-Tab & exposé with live previews
-
-**Alt-Tab with live previews.** The exposé reveals windows from *other
-workspaces* — even occluded ones. Real moving thumbnails, not icons.
-
-<video src="assets/wlr-switcher/altab.mp4" autoplay loop muted playsinline width="49%"></video>
-<video src="assets/wlr-switcher/expose.mp4" autoplay loop muted playsinline width="49%"></video>
-
-```sh
-# A true Alt-Tab: bind it to a held modifier.
-bindsym Mod1+Tab exec wlr-switcher
-```
-
----
-
-## wlr-chooser — pick a window or screen
-
-**Share the right window.** A rofi-like picker with live thumbnails for the
-screencast portal — pick from previews, not a text list.
-
-<img src="assets/wlr-chooser/picker.png" width="900">
-
----
-
-## wlr-shot — capture the screen
-
-**Screenshot or record anything.** Region, window or whole output → PNG/JPEG, or
-H.264 / GIF with **system audio** and **timelapse**. Below: the frozen region selector.
-
-<video src="assets/wlr-shot/select.mp4" autoplay loop muted playsinline width="900"></video>
-
-```sh
-wlr-shot screenshot -s out.png        # drag a region on a frozen screen
-wlr-shot record -o DP-1 --audio out.mp4
-```
-
----
-
 ## wlr-peek — inspect the screen
 
 **Inspect the screen.** Colour pipette, magnifier, live picture-in-picture
-**mirror**, OCR, visual **grep** and a change **monitor** — in one tool.
+**mirror**, OCR, visual **grep**, a change **monitor** — one tool.
+
+`mirror`, `ocr` and `watch` take `--app-id`/`--title`, so they reach a window
+even when it's occluded or off-workspace.
 
 <video src="assets/wlr-peek/color.mp4" autoplay loop muted playsinline width="49%"></video>
 <video src="assets/wlr-peek/loupe.mp4" autoplay loop muted playsinline width="49%"></video>
@@ -102,9 +120,9 @@ subcommands (`ocr`, `watch`, …) running against the screen:
 ```sh
 wlr-peek color                          # pipette — pick a colour
 wlr-peek loupe                          # magnifier — scroll to zoom
-wlr-peek mirror -w ID                   # live picture-in-picture of a window
+wlr-peek mirror --app-id firefox        # live PiP of a window by name — even off-workspace
 wlr-peek region                         # slurp replacement — print "X,Y WxH"
-wlr-peek ocr -s                         # OCR a region you select
+wlr-peek ocr --app-id thunderbird       # read a window's text without raising it
 wlr-peek grep "feature"                 # visual grep — find on-screen text
 wlr-peek watch -o DP-1 --on change      # fire when a region changes
 ```

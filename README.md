@@ -19,6 +19,13 @@ Five sharp tools for **wlroots** compositors, all sharing one capture engine.
 | **[wlr-shot](crates/wlr-shot)** | **Screen capture** — screenshots of an output/region/window (PNG/JPEG/PPM), copy to clipboard; plus **recording** (H.264, or animated GIF/WebP) with **system audio** & **timelapse** (NVENC/VAAPI/libx264). | [![v](https://img.shields.io/crates/v/wlr-shot.svg)](https://crates.io/crates/wlr-shot) |
 | **[wlr-draw](crates/wlr-draw)** | **Draw on screen** — a transparent annotation overlay (gromit-mpx-style): freehand, shapes, arrows, text, dwell-to-snap, element move, plus presenter **spotlight**, **freeze-frame** and **save**. Daemon + control socket. | [![v](https://img.shields.io/crates/v/wlr-draw.svg)](https://crates.io/crates/wlr-draw) |
 
+> **Point at a window you can't see.** `wlr-shot` and `wlr-peek` take `--app-id`/`--title`,
+> so you can screenshot, record, mirror, OCR or watch a window *by name* — even one occluded
+> behind others or on another workspace, with no clicking and no workspace switch
+> (`wlr-shot screenshot --list-windows` shows what's open). Reaching hidden and off-screen
+> windows is the whole point of building on `ext-foreign-toplevel` rather than grabbing a
+> visible output.
+
 They all share two library crates: **[wlr-capture](crates/wlr-capture)**, the wlroots
 capture engine (`ext-image-copy-capture-v1`, full-resolution dma-buf zero-copy with a
 CPU shm fallback) plus an egui/EGL rendering + dma-buf-import toolkit; and

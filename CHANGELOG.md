@@ -18,6 +18,12 @@ All notable changes to this project are documented here. The format is based on
 - **`wlr-draw` output hotplug** — the daemon no longer quits when an output is unplugged,
   DPMS-off, or reconfigured; it keeps the other overlays and rebuilds one when the output
   returns.
+- **`wlr-draw` repaint pacing** — repaints follow frame callbacks instead of blocking on
+  buffer swaps, so the daemon no longer freezes on the NVIDIA EGL driver.
+
+### Changed
+
+- Dependency refresh (`cargo upgrade --incompatible`).
 
 ## 1.4.0 — 2026-07-01
 

@@ -1,3 +1,5 @@
 /target
 .claude/settings.local.json
 /local-install.sh
+/docs/_site
+/docs/.jekyll-cache
