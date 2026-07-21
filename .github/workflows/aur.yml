@@ -87,28 +87,21 @@ jobs:
             makepkg --printsrcinfo > .SRCINFO
           '
 
-      - name: Configure SSH for the AUR
+      - name: Install the AUR deploy key
         if: env.AUR_SSH_KEY != ''
         run: |
           install -dm700 ~/.ssh
           printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          # A dedicated deploy key to a known host in ephemeral CI: skip host-key
-          # verification outright rather than fight ssh-keyscan (which left a
-          # conflicting entry and kept failing verification).
-          cat > ~/.ssh/config <<'EOF'
-          Host aur.archlinux.org
-            User aur
-            IdentityFile ~/.ssh/aur
-            IdentitiesOnly yes
-            StrictHostKeyChecking no
-            UserKnownHostsFile /dev/null
-          EOF
 
       - name: Push to the AUR
         if: env.AUR_SSH_KEY != ''
         working-directory: packaging/aur
         run: |
+          # Impose the key + host-key handling on git's ssh directly; the runner's
+          # HOME juggling means a ~/.ssh/config isn't reliably read. A dedicated deploy
+          # key to a known host in ephemeral CI: skip host-key verification outright.
+          export GIT_SSH_COMMAND="ssh -i $HOME/.ssh/aur -o IdentitiesOnly=yes -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null"
           git config --global user.name  'Stéphane Jourdois'
           git config --global user.email 'stephane@jourdois.fr'
           git config --global --add safe.directory '*'

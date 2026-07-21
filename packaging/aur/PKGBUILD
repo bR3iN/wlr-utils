@@ -10,7 +10,7 @@ license=('MIT' 'Apache-2.0')
 # zero-copy capture path, FFmpeg/VAAPI for wlr-shot recording, PipeWire for its
 # audio track, Tesseract/Leptonica for wlr-peek OCR, and D-Bus for wlr-draw's tray.
 depends=('wayland' 'libxkbcommon' 'fontconfig' 'libglvnd' 'mesa' 'ffmpeg' 'libva'
-         'libpipewire' 'tesseract' 'leptonica' 'dbus')
+         'libpipewire' 'tesseract' 'leptonica' 'dbus' 'libwebp')
 makedepends=('cargo' 'clang')
 optdepends=('noto-fonts-cjk: render CJK (Japanese/Chinese/Korean) text'
             'tesseract-data-eng: English OCR for `wlr-peek ocr`'
@@ -29,10 +29,12 @@ build() {
 	cd "$pkgname-$pkgver"
 	export RUSTUP_TOOLCHAIN=stable
 	export CARGO_TARGET_DIR=target
-	# Arch's rustc links with lld, which can't resolve the vendored static libwebp
-	# (WebPAnimEncoder*/WebPMux* come out undefined); fall back to GNU ld, as on the
-	# Debian build where the same code links cleanly.
-	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=bfd"
+	# On Arch the system libwebp (pulled by ffmpeg) shadows the crate's vendored copy,
+	# so the mux/anim symbols (WebPMuxDelete, WebPAnimEncoder*) resolve from the
+	# transitively-needed libwebpmux.so instead of the static build. Use GNU ld and let
+	# it accept those DSO symbols. (The Debian build has no system libwebp, so it links
+	# the vendored copy and needs none of this.)
+	export RUSTFLAGS="${RUSTFLAGS:-} -C link-arg=-fuse-ld=bfd -C link-arg=-Wl,--copy-dt-needed-entries"
 	# The `wlr-utils` bundle crate builds all five binaries in one shot (it is kept
 	# out of the workspace default set, so it must be named explicitly).
 	cargo build --frozen --release -p wlr-utils
