@@ -102,8 +102,12 @@ one matching your system:
 | Debian 12 (bookworm) | `…_amd64.bookworm.deb` |
 | Debian 13 (trixie) | `…_amd64.trixie.deb` |
 | Debian 14 (forky) / sid | `…_amd64.forky.deb` / `…_amd64.sid.deb` |
-| Ubuntu 22.04 (jammy) | `…_amd64.jammy.deb` — video only, no system-audio track |
+| Ubuntu 22.04 (jammy) | `…_amd64.jammy.deb` — screenshots only, no `wlr-shot record` |
 | Ubuntu 24.04 (noble) / 26.04 | `…_amd64.noble.deb` / `…_amd64.ubuntu2604.deb` |
+
+The Ubuntu 22.04 `.deb` is screenshots-only: its PipeWire / FFmpeg are too old to build the
+recorder, so `wlr-shot record` is omitted. For recording there, use `cargo install
+wlr-utils` or the prebuilt tarball.
 
 > [!IMPORTANT]
 > These `.deb`s link **dynamically** against the FFmpeg (`libavutil`) and Leptonica

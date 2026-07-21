@@ -35,22 +35,22 @@ path = "src/bin/wlr-shot.rs"
 name = "wlr-draw"
 path = "src/bin/wlr-draw.rs"
 
-# The bundle is the full-featured build by default. `audio` (native PipeWire) is the
-# only toggle: drop it (`--no-default-features`) on a host whose PipeWire is too old to
-# link libspa — e.g. the Ubuntu 22.04 .deb, which then records video without a
-# system-audio track. wlr-shot's other defaults (i18n, video) stay on regardless.
+# The bundle is the full build by default. `recording` (wlr-shot's video+audio encode
+# stack) is the toggle: drop it (`--no-default-features`) where FFmpeg/PipeWire are too
+# old to build the encoder — e.g. the Ubuntu 22.04 .deb, which is then screenshots-only
+# (no `wlr-shot record`, and no FFmpeg/PipeWire link at all). Other tools keep defaults.
 [features]
-default = ["audio"]
-audio = ["wlr-shot/audio"]
+default = ["recording"]
+recording = ["wlr-shot/video", "wlr-shot/audio"]
 
 [dependencies]
 # Each tool with its default features, so the bundle is the full-featured build
 # (GPU capture, OCR, video+audio recording, tray). Pull a single tool instead for a
-# lighter footprint: `cargo install wlr-shot`, etc. wlr-shot's `audio` is gated behind
-# this crate's `audio` feature (above) so a .deb can be built without it.
+# lighter footprint: `cargo install wlr-shot`, etc. wlr-shot's recording is gated behind
+# this crate's `recording` feature (above) so a .deb can be built without FFmpeg/PipeWire.
 wlr-chooser = { path = "../wlr-chooser", version = "1.5.0" }
 wlr-peek = { path = "../wlr-peek", version = "1.5.0" }
-wlr-shot = { path = "../wlr-shot", version = "1.5.0", default-features = false, features = ["i18n", "video"] }
+wlr-shot = { path = "../wlr-shot", version = "1.5.0", default-features = false, features = ["i18n"] }
 wlr-draw = { path = "../wlr-draw", version = "1.5.0" }
 anyhow.workspace = true
 
@@ -80,15 +80,15 @@ assets = [
     ["README.md", "usr/share/doc/wlr-utils/README.md", "644"],
 ]
 
-# Audio-less build for hosts whose PipeWire is too old to link libspa (Ubuntu 22.04).
-# Same package name; only the description flags the missing system-audio track. Built
-# with `cargo deb --variant no-audio --no-default-features`.
-[package.metadata.deb.variants.no-audio]
+# Screenshots-only build for hosts whose FFmpeg/PipeWire are too old to build the encoder
+# (Ubuntu 22.04). Same package name; the description flags the missing recording. Built
+# with `cargo deb --variant no-recording --no-default-features`.
+[package.metadata.deb.variants.no-recording]
 name = "wlr-utils"
 extended-description = """\
 The wlr-utils suite in one package: wlr-chooser (screen-share picker), wlr-switcher \
 (Alt-Tab/exposé), wlr-peek (colour picker, loupe, OCR, live mirror, watch, visual grep), \
-wlr-shot (screenshots and recording) and wlr-draw (on-screen annotation overlay) — native \
-screen tools for wlroots compositors, sharing one capture engine. This build records \
-video without a system-audio track (this distribution's PipeWire is too old to link it); \
-for audio recording, install with `cargo install wlr-utils` or the prebuilt tarball."""
+wlr-shot (screenshots) and wlr-draw (on-screen annotation overlay) — native screen tools \
+for wlroots compositors, sharing one capture engine. This is a screenshots-only build: \
+`wlr-shot record` is omitted because this distribution's FFmpeg/PipeWire are too old to \
+build the encoder. For recording, install with `cargo install wlr-utils` or the tarball."""

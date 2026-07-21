@@ -25,9 +25,9 @@ All notable changes to this project are documented here. The format is based on
 
 ### Changed
 
-- **Ubuntu 22.04** — ships a `.deb` again, built without system audio (its PipeWire is
-  too old to link it), so `wlr-shot record` captures video only; the package description
-  says as much. For audio there, use `cargo install wlr-utils` or the prebuilt tarball.
+- **Ubuntu 22.04** — now ships a screenshots-only `.deb` (its PipeWire / FFmpeg are too
+  old to build the recorder, so `wlr-shot record` is omitted); for recording there, use
+  `cargo install wlr-utils` or the prebuilt tarball.
 - Dependency refresh (`cargo upgrade --incompatible`).
 
 ## 1.4.0 — 2026-07-01
