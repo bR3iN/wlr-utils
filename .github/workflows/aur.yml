@@ -63,7 +63,11 @@ jobs:
       - name: Prepare the PKGBUILD
         working-directory: packaging/aur
         run: |
-          cp "${{ matrix.pkgbuild }}" PKGBUILD
+          # The source package's file is already named PKGBUILD (copying it onto
+          # itself is an error); only the -bin variant needs renaming into place.
+          if [ "${{ matrix.pkgbuild }}" != PKGBUILD ]; then
+            cp "${{ matrix.pkgbuild }}" PKGBUILD
+          fi
           # The release drives the version; a fresh version resets pkgrel to 1.
           sed -i "s/^pkgver=.*/pkgver=${{ steps.ver.outputs.pkgver }}/" PKGBUILD
           sed -i "s/^pkgrel=.*/pkgrel=1/" PKGBUILD
@@ -89,12 +93,13 @@ jobs:
           install -dm700 ~/.ssh
           printf '%s\n' "$AUR_SSH_KEY" > ~/.ssh/aur
           chmod 600 ~/.ssh/aur
-          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null
+          ssh-keyscan -t ed25519,rsa aur.archlinux.org >> ~/.ssh/known_hosts 2>/dev/null || true
           cat > ~/.ssh/config <<'EOF'
           Host aur.archlinux.org
             User aur
             IdentityFile ~/.ssh/aur
             IdentitiesOnly yes
+            StrictHostKeyChecking accept-new
           EOF
 
       - name: Push to the AUR
