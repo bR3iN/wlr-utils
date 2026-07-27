@@ -389,6 +389,13 @@ struct SessionData {
     frame_failed: Option<FailureReason>,
     /// Terminal: the session/source stopped and won't produce more frames.
     stopped: bool,
+    /// Set for a single capture that is closed right after (`capture_*_once`).
+    ///
+    /// Such a capture ends up as CPU pixels anyway — it is encoded, cropped or
+    /// sampled — so importing a dma-buf only to read it straight back would build a
+    /// whole EGL context per call for nothing. Live sessions, whose frames are
+    /// sampled as GL textures, keep the zero-copy path.
+    one_shot: bool,
 }
 
 /// A reusable buffer backing one session, kept alive between frames. Either a
@@ -762,10 +769,7 @@ impl Client {
         output: &Output,
         budget: Duration,
     ) -> Result<Frame, CaptureError> {
-        let id = self.open_output_session(output)?;
-        let r = self.poll_one(&id, budget);
-        self.close_session(&id);
-        r
+        self.capture_output_frame(output, budget, true)
     }
 
     /// One-shot: capture a single frame of `toplevel`, then tear the session down.
@@ -775,9 +779,40 @@ impl Client {
         budget: Duration,
     ) -> Result<Frame, CaptureError> {
         let id = self.open_toplevel_session(toplevel)?;
+        if let Some(d) = self.state.sessions.get_mut(&id) {
+            d.one_shot = true;
+        }
         let r = self.poll_one(&id, budget);
         self.close_session(&id);
         r
+    }
+
+    /// Capture one frame from `output`, through the shm path (`one_shot`) or the
+    /// live dma-buf path.
+    fn capture_output_frame(
+        &mut self,
+        output: &Output,
+        budget: Duration,
+        one_shot: bool,
+    ) -> Result<Frame, CaptureError> {
+        let id = self.open_output_session(output)?;
+        if one_shot && let Some(d) = self.state.sessions.get_mut(&id) {
+            d.one_shot = true;
+        }
+        let r = self.poll_one(&id, budget);
+        self.close_session(&id);
+        r
+    }
+
+    /// Capture one frame the way a live consumer would, so the dma-buf path is
+    /// exercised even for a single frame. This is what `doctor` probes with;
+    /// ordinary single captures want [`Client::capture_output_once`].
+    pub fn probe_gpu_capture(
+        &mut self,
+        output: &Output,
+        budget: Duration,
+    ) -> Result<Frame, CaptureError> {
+        self.capture_output_frame(output, budget, false)
     }
 
     /// Poll until session `id` yields a frame, it stops, or `budget` elapses.
@@ -1028,7 +1063,7 @@ impl Client {
     /// gbm/allocation failure) so the caller falls back to shm.
     #[cfg(feature = "gpu")]
     fn alloc_dmabuf(&mut self, id: &SessionId, w: u32, h: u32) -> Option<Buf> {
-        if self.gpu_disabled {
+        if self.gpu_disabled || self.state.sessions.get(id).is_some_and(|d| d.one_shot) {
             return None;
         }
         let dmabuf_mgr = self.state.dmabuf.as_ref().cloned()?;

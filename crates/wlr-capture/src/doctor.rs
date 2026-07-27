@@ -27,7 +27,7 @@ fn gpu_probe() -> String {
     let Some(output) = client.outputs().first().cloned() else {
         return "no output to probe".to_string();
     };
-    let frame = match client.capture_output_once(&output, Duration::from_secs(2)) {
+    let frame = match client.probe_gpu_capture(&output, Duration::from_secs(2)) {
         Ok(f) => f,
         Err(e) => return format!("probe capture failed ({e})"),
     };
