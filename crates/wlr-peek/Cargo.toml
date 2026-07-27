@@ -16,7 +16,11 @@ name = "wlr-peek"
 path = "src/main.rs"
 
 [features]
-default = ["ocr", "watch", "i18n"]
+default = ["ocr", "watch", "i18n", "gpu"]
+# Zero-copy dma-buf capture (links gbm). On by default: `wlr-peek mirror` samples
+# capture frames as GL textures, so the GPU path saves a CPU readback per frame.
+# Disable at runtime with --no-gpu rather than at build time.
+gpu = ["wlr-capture/gpu"]
 # Localised UI (the overlay hint) via Fluent. On by default; `--no-default-features`
 # builds English-only with no Fluent dependency.
 i18n = ["wlr-i18n/i18n", "dep:rust-embed"]
