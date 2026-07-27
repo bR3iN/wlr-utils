@@ -67,7 +67,7 @@ impl DmabufImporter for HostImporter<'_> {
         use glow::HasContext as _;
         let egl = self.egl?;
         let size = egui::vec2(frame.width as f32, frame.height as f32);
-        let attribs = dmabuf_image_attribs(&frame);
+        let attribs = dmabuf_image_attribs(&frame, egl.modifiers);
         // EGL_NO_CONTEXT for dma-buf import; EGL dups the fd, so we may close ours.
         let image = unsafe {
             (egl.create_image)(

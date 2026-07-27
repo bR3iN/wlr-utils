@@ -51,6 +51,10 @@ pub(crate) struct DmabufEgl {
     pub(crate) create_image: EglCreateImageKhr,
     pub(crate) destroy_image: EglDestroyImageKhr,
     pub(crate) image_target: GlEglImageTargetTexture2dOes,
+    /// Whether `EGL_EXT_image_dma_buf_import_modifiers` is available. Without it
+    /// the modifier attributes are not accepted, and only implicit-layout,
+    /// single-plane buffers can be imported.
+    pub(crate) modifiers: bool,
 }
 
 /// Load the dma-buf import entry points. `None` if the driver lacks them (then there
@@ -59,6 +63,12 @@ pub(crate) fn load_dmabuf_egl(egl: &Egl, display: egl::Display) -> Option<Dmabuf
     let create = egl.get_proc_address("eglCreateImageKHR")?;
     let destroy = egl.get_proc_address("eglDestroyImageKHR")?;
     let target = egl.get_proc_address("glEGLImageTargetTexture2DOES")?;
+    let modifiers = egl
+        .query_string(Some(display), egl::EXTENSIONS)
+        .is_ok_and(|s| {
+            s.to_str()
+                .is_ok_and(|s| has_extension(s, "EGL_EXT_image_dma_buf_import_modifiers"))
+        });
     // Same calling convention (extern "system"), just typed signatures.
     Some(unsafe {
         DmabufEgl {
@@ -68,15 +78,27 @@ pub(crate) fn load_dmabuf_egl(egl: &Egl, display: egl::Display) -> Option<Dmabuf
             image_target: std::mem::transmute::<extern "system" fn(), GlEglImageTargetTexture2dOes>(
                 target,
             ),
+            modifiers,
         }
     })
+}
+
+/// Whether `list` (a space-separated EGL extension string) contains `want`. Split
+/// on whitespace rather than substring-matching, so a longer name that merely
+/// starts with `want` doesn't count as a hit.
+fn has_extension(list: &str, want: &str) -> bool {
+    list.split_ascii_whitespace().any(|e| e == want)
 }
 
 /// Build the `EGL_LINUX_DMA_BUF_EXT` attribute list for `frame`. Every plane is
 /// described: a compressed modifier carries auxiliary planes, and importing it with
 /// only the first one is rejected (`EGL_BAD_MATCH`). The fds are only borrowed (EGL
 /// dups them in `eglCreateImageKHR`), so `frame` must outlive the import call.
-pub(crate) fn dmabuf_image_attribs(frame: &wl::DmabufFrame) -> Vec<i32> {
+///
+/// `modifiers` gates the modifier attributes: without
+/// `EGL_EXT_image_dma_buf_import_modifiers` they are not valid names and would
+/// fail the import outright, so the layout is left implicit.
+pub(crate) fn dmabuf_image_attribs(frame: &wl::DmabufFrame, modifiers: bool) -> Vec<i32> {
     let mut a = vec![
         EGL_WIDTH,
         frame.width as i32,
@@ -94,11 +116,15 @@ pub(crate) fn dmabuf_image_attribs(frame: &wl::DmabufFrame) -> Vec<i32> {
             plane.offset as i32,
             pitch,
             plane.stride as i32,
-            mod_lo,
-            (frame.modifier & 0xffff_ffff) as i32,
-            mod_hi,
-            (frame.modifier >> 32) as i32,
         ]);
+        if modifiers {
+            a.extend_from_slice(&[
+                mod_lo,
+                (frame.modifier & 0xffff_ffff) as i32,
+                mod_hi,
+                (frame.modifier >> 32) as i32,
+            ]);
+        }
     }
     a.push(EGL_ATTRIB_NONE);
     a
@@ -213,7 +239,7 @@ impl GpuReadback {
             )
             .context("eglMakeCurrent")?;
 
-        let attribs = dmabuf_image_attribs(&frame);
+        let attribs = dmabuf_image_attribs(&frame, egl.modifiers);
         let image = unsafe {
             (egl.create_image)(
                 egl.display,
@@ -306,16 +332,13 @@ impl GpuReadback {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::os::fd::OwnedFd;
 
     /// A frame with `n` planes, each with a distinct offset/stride so the attribute
     /// list can be checked positionally. The fds are dup'd stdin — never imported.
     fn frame(n: usize) -> wl::DmabufFrame {
         let planes = (0..n)
             .map(|i| wl::DmabufPlane {
-                fd: rustix::io::dup(std::io::stdin())
-                    .map(OwnedFd::from)
-                    .unwrap(),
+                fd: rustix::io::dup(std::io::stdin()).unwrap(),
                 offset: 100 + i as u32,
                 stride: 200 + i as u32,
             })
@@ -340,7 +363,7 @@ mod tests {
 
     #[test]
     fn single_plane_attribs() {
-        let a = dmabuf_image_attribs(&frame(1));
+        let a = dmabuf_image_attribs(&frame(1), true);
         assert_eq!(get(&a, EGL_WIDTH), Some(64));
         assert_eq!(get(&a, EGL_HEIGHT), Some(32));
         assert_eq!(get(&a, PLANE_ATTRS[0][1]), Some(100));
@@ -350,25 +373,35 @@ mod tests {
         assert_eq!(get(&a, PLANE_ATTRS[1][0]), None);
     }
 
+    #[test]
+    fn attribs_without_the_modifiers_extension_omit_the_modifier() {
+        let a = dmabuf_image_attribs(&frame(1), false);
+        assert_eq!(get(&a, PLANE_ATTRS[0][1]), Some(100));
+        assert_eq!(get(&a, PLANE_ATTRS[0][3]), None);
+        assert_eq!(get(&a, PLANE_ATTRS[0][4]), None);
+    }
+
+    #[test]
+    fn extension_lookup_matches_whole_names() {
+        let list = "EGL_EXT_image_dma_buf_import EGL_KHR_image_base";
+        assert!(has_extension(list, "EGL_EXT_image_dma_buf_import"));
+        assert!(!has_extension(
+            list,
+            "EGL_EXT_image_dma_buf_import_modifiers"
+        ));
+    }
+
     /// The Intel CCS layouts that issue #6 tripped on carry three planes.
     #[test]
     fn multi_plane_attribs_describe_every_plane() {
         for n in 2..=4 {
-            let a = dmabuf_image_attribs(&frame(n));
-            for i in 0..n {
-                assert_eq!(
-                    get(&a, PLANE_ATTRS[i][1]),
-                    Some(100 + i as i32),
-                    "plane {i}"
-                );
-                assert_eq!(
-                    get(&a, PLANE_ATTRS[i][2]),
-                    Some(200 + i as i32),
-                    "plane {i}"
-                );
+            let a = dmabuf_image_attribs(&frame(n), true);
+            for (i, names) in PLANE_ATTRS.iter().enumerate().take(n) {
+                assert_eq!(get(&a, names[1]), Some(100 + i as i32), "plane {i}");
+                assert_eq!(get(&a, names[2]), Some(200 + i as i32), "plane {i}");
                 // The modifier is repeated on every plane, split in halves.
-                assert_eq!(get(&a, PLANE_ATTRS[i][3]), Some(8), "plane {i}");
-                assert_eq!(get(&a, PLANE_ATTRS[i][4]), Some(0x0100_0000), "plane {i}");
+                assert_eq!(get(&a, names[3]), Some(8), "plane {i}");
+                assert_eq!(get(&a, names[4]), Some(0x0100_0000), "plane {i}");
             }
             assert!(get(&a, PLANE_ATTRS[n - 1][0]).is_some());
             assert_eq!(a.last(), Some(&EGL_ATTRIB_NONE));
