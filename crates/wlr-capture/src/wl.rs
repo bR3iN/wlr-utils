@@ -1126,7 +1126,7 @@ impl Client {
             .ok()?;
         let device = GbmDevice::new(file).ok()?;
         if debug() {
-            eprintln!("wlr-chooser: gbm device {}", path.display());
+            eprintln!("wlr-capture: gbm device {}", path.display());
         }
         self.gbm = Some(device);
         Some(())
@@ -1201,10 +1201,10 @@ fn render_node_for(dev: Option<u64>) -> std::path::PathBuf {
         .unwrap_or_else(|| PathBuf::from("/dev/dri/renderD128"))
 }
 
-/// Whether verbose capture diagnostics are enabled (`WLR_CHOOSER_DEBUG`).
+/// Whether verbose capture diagnostics are enabled (`WLR_UTILS_DEBUG`).
 #[cfg(feature = "gpu")]
 fn debug() -> bool {
-    std::env::var_os("WLR_CHOOSER_DEBUG").is_some()
+    std::env::var_os("WLR_UTILS_DEBUG").is_some()
 }
 
 /// Turn a ready capture into a [`Frame`] for the UI. shm is read back + converted
