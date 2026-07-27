@@ -10,6 +10,7 @@ pub mod shell;
 pub mod switcher_cli;
 pub mod ui;
 
+use std::sync::atomic::AtomicBool;
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::Instant;
 use wlr_capture::theme;
@@ -53,12 +54,16 @@ pub fn run_overlay(opts: ui::Options, t0: Instant) -> anyhow::Result<Option<ui::
     // Start capturing first thing: the thread owns the non-Send Wayland client and
     // must connect, enumerate, and open sessions before any thumbnail appears.
     let (tx, rx) = mpsc::channel();
-    std::thread::spawn(move || ui::capture_thread(tx));
+    // Raised by the UI when a dma-buf import fails; the capture thread then
+    // reallocates in shm.
+    let gpu_failed = Arc::new(AtomicBool::new(false));
+    let flag = gpu_failed.clone();
+    std::thread::spawn(move || ui::capture_thread(tx, flag));
     shell::tlog(t0, "capture-thread spawned");
 
     let out: ui::Outcome = Arc::new(Mutex::new(None));
     let theme = theme::Theme::load();
-    let app = ui::App::new(rx, out.clone(), opts, theme);
+    let app = ui::App::new(rx, out.clone(), opts, theme, gpu_failed);
     shell::tlog(t0, "ui ready, entering overlay");
     shell::run(app, t0)?;
 

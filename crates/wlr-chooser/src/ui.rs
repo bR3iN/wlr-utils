@@ -6,6 +6,7 @@
 
 use crate::tr;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -174,7 +175,7 @@ enum Capturable {
 // SessionId (a wayland ObjectId) is used as a map key: its interior-mutable
 // "alive" flag is not part of Hash/Eq, so it is a sound key.
 #[allow(clippy::mutable_key_type)]
-pub fn capture_thread(tx: Sender<Msg>) {
+pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>) {
     let mut client = match wl::Client::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -285,6 +286,20 @@ pub fn capture_thread(tx: Sender<Msg>) {
                     break 'outer;
                 }
             }
+        }
+
+        // The UI could not import a dma-buf: capture into shm from now on, so the
+        // previews come back instead of merely reporting that they can't. The
+        // sessions are closed rather than just rebuffered — capture is incremental
+        // by damage, so a fresh buffer on a live session would stay empty until the
+        // source repaints, which a static window never does. They reopen below.
+        if gpu_failed.swap(false, Ordering::Relaxed) && !client.gpu_disabled() {
+            eprintln!("wlr-capture: dma-buf import failed; falling back to shm");
+            client.disable_gpu();
+            for (_, id) in sessions.drain() {
+                client.close_session(&id);
+            }
+            by_id.clear();
         }
 
         // Drive all sessions for one round: this blocks up to the round budget
@@ -519,6 +534,8 @@ pub struct App {
     /// deterministic, so these will never get a preview: drawing them as
     /// "loading" would be a lie that never resolves.
     failed: HashSet<String>,
+    /// Raised when an import fails, so the capture thread drops to shm.
+    gpu_failed: Arc<AtomicBool>,
     icons: HashMap<String, egui::TextureHandle>,
     filter: String,
     mode: Mode,
@@ -551,13 +568,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(rx: Receiver<Msg>, out: Outcome, opts: Options, theme: Theme) -> Self {
+    pub fn new(
+        rx: Receiver<Msg>,
+        out: Outcome,
+        opts: Options,
+        theme: Theme,
+        gpu_failed: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             rx,
             sources: Vec::new(),
             textures: HashMap::new(),
             native: HashMap::new(),
             failed: HashSet::new(),
+            gpu_failed,
             icons: HashMap::new(),
             filter: String::new(),
             mode: opts.mode,
@@ -667,6 +691,8 @@ impl App {
                         }
                         None => {
                             self.failed.insert(key);
+                            // Ask the capture thread to switch this session to shm.
+                            self.gpu_failed.store(true, Ordering::Relaxed);
                         }
                     }
                 }
