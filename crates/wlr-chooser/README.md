@@ -77,7 +77,8 @@ cargo build --release -p wlr-chooser
 
 The `gpu` feature (on by default) enables zero-copy dma-buf capture and needs `libgbm-dev`
 at build time (`libgbm` at runtime, from Mesa). `--no-default-features` builds a pure-CPU
-binary with no gbm dependency. The whole suite also ships as a single `wlr-utils` `.deb`
+binary with no gbm dependency; `--no-gpu` (or `WLR_NO_GPU=1`) switches the same build to
+shared memory at runtime, and previews fall back to it on their own if an import fails. The whole suite also ships as a single `wlr-utils` `.deb`
 on every [release](https://github.com/sjourdois/wlr-utils/releases/latest).
 
 ## Uninstall

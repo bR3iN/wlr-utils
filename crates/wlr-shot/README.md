@@ -163,8 +163,10 @@ needs `zwlr_data_control_manager_v1`. Run `wlr-shot doctor` to see what your com
 exposes; see [COMPATIBILITY.md](../../COMPATIBILITY.md) for the full matrix.
 
 The interactive region selector (`-s`) renders a frozen overlay through EGL/GLES, so
-**every build** needs a working GL stack (`libegl1`) at runtime. Screenshots use CPU shm
-capture, so no `libgbm` is required.
+**every build** needs a working GL stack (`libegl1`) at runtime. The default build also
+links `libgbm` for the zero-copy dma-buf path used by `record`; screenshots themselves are
+captured through shared memory. `--no-gpu` (or `WLR_NO_GPU=1`) forces the shm path
+everywhere, and `wlr-shot doctor` reports whether the dma-buf path actually works here.
 
 The default build (with `record`) additionally links the system **FFmpeg** libraries, so
 it needs their development packages at build time — on Debian/Ubuntu: `libavcodec-dev

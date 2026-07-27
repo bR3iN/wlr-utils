@@ -54,14 +54,16 @@ A wlroots compositor. What you get depends on which capture protocols it exposes
 Tools degrade gracefully: where windows aren't capturable they keep their screen features
 and say so. See [COMPATIBILITY.md](COMPATIBILITY.md) for the full matrix (Hyprland, niri,
 labwc, …), or run the `doctor` command that every tool exposes (e.g. `wlr-shot doctor`,
-or `wlr-chooser --doctor`) to check your own compositor.
+or `wlr-chooser --doctor`) to check your own compositor. It also captures a frame through
+the GPU path and reports whether it can be imported, which is the line to quote in a bug
+report.
 
 Runtime libraries:
 
 | Library | Needed by | Why |
 | --- | --- | --- |
 | `libegl1` | every tool | EGL/GLES overlay rendering |
-| `libgbm` (Mesa) | `wlr-chooser` | zero-copy GPU capture path (`wlr-shot`/`wlr-peek` use CPU shm, so they don't need it) |
+| `libgbm` (Mesa) | every tool | zero-copy GPU capture path; pass `--no-gpu` (or set `WLR_NO_GPU=1`) to capture through shared memory instead |
 | `xdg-desktop-portal-wlr` ≥ 0.8 | `wlr-chooser` | portal-based picking |
 | `zwlr-foreign-toplevel-management-v1` | `wlr-switcher` | focusing windows |
 
