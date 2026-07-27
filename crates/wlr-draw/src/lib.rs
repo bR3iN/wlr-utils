@@ -31,6 +31,11 @@ control socket — bind them to compositor keys (e.g. sway `bindsym $mod+a exec 
 toggle`)."
 )]
 struct Cli {
+    /// Capture through shared memory instead of the zero-copy dma-buf path.
+    /// Use it if the frozen backdrop comes out broken on your driver; also
+    /// settable with WLR_NO_GPU=1.
+    #[arg(long, global = true)]
+    no_gpu: bool,
     #[command(subcommand)]
     cmd: Option<Ctl>,
 }
@@ -83,6 +88,9 @@ pub fn main() -> anyhow::Result<()> {
     // on-screen hints stay English regardless of `$LANG`.
     crate::i18n::init();
     let cli = Cli::parse();
+    if cli.no_gpu {
+        wlr_capture::wl::disable_gpu_globally();
+    }
     match cli.cmd {
         None => overlay::run(),
         // Doctor probes the compositor directly — it doesn't drive the daemon.

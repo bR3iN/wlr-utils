@@ -43,6 +43,17 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
 #[cfg(feature = "gpu")]
 const DRM_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
 
+/// Process-wide off switch for the dma-buf path, set once at startup by a
+/// `--no-gpu` flag. A per-`Client` setter would have to be threaded through every
+/// construction site in every tool for a decision that is taken once for the whole
+/// run; `WLR_NO_GPU` covers the same ground from the environment.
+static GPU_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Capture through shm in every [`Client`] created from now on. See [`GPU_DISABLED`].
+pub fn disable_gpu_globally() {
+    GPU_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
 /// Most planes `EGL_EXT_image_dma_buf_import(_modifiers)` can describe.
 #[cfg(feature = "gpu")]
 const MAX_DMABUF_PLANES: u32 = 4;
@@ -641,7 +652,8 @@ impl Client {
             open: HashMap::new(),
             #[cfg(feature = "gpu")]
             gbm: None,
-            gpu_disabled: std::env::var_os("WLR_NO_GPU").is_some(),
+            gpu_disabled: GPU_DISABLED.load(std::sync::atomic::Ordering::Relaxed)
+                || std::env::var_os("WLR_NO_GPU").is_some(),
         })
     }
 
