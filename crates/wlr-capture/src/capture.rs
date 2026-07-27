@@ -25,6 +25,30 @@ pub fn frame_to_image(frame: Frame) -> Result<CapturedImage, CaptureError> {
     }
 }
 
+/// Capture once via `once`, and convert the frame to CPU pixels.
+///
+/// A dma-buf the GPU refuses to import is not a fatal condition: the same capture
+/// works through shm, which every driver can do. On import failure the client drops
+/// to shm ([`Client::disable_gpu`]) and the capture is retried once, so a driver we
+/// can't hand buffers to costs a round trip rather than the whole command.
+fn capture_to_image(
+    client: &mut Client,
+    budget: Duration,
+    mut once: impl FnMut(&mut Client, Duration) -> Result<Frame, CaptureError>,
+) -> Result<CapturedImage, CaptureError> {
+    let frame = once(client, budget)?;
+    let was_gpu = matches!(frame, Frame::Dmabuf(_));
+    match frame_to_image(frame) {
+        Ok(img) => Ok(img),
+        Err(e) if was_gpu && !client.gpu_disabled() => {
+            eprintln!("wlr-capture: dma-buf import failed ({e}); falling back to shm");
+            client.disable_gpu();
+            frame_to_image(once(client, budget)?)
+        }
+        Err(e) => Err(e),
+    }
+}
+
 /// Capture a whole output: the named one, or the sole output if unnamed.
 pub fn capture_output(
     client: &mut Client,
@@ -49,7 +73,7 @@ pub fn capture_output(
             }
         },
     };
-    frame_to_image(client.capture_output_once(output, budget)?)
+    capture_to_image(client, budget, |c, b| c.capture_output_once(output, b))
 }
 
 /// Capture a window by its foreign-toplevel identifier.
@@ -64,7 +88,7 @@ pub fn capture_window(
         .find(|t| t.identifier == id)
         .cloned()
         .ok_or_else(|| CaptureError::WindowNotFound(id.to_string()))?;
-    frame_to_image(client.capture_toplevel_once(&tl, budget)?)
+    capture_to_image(client, budget, |c, b| c.capture_toplevel_once(&tl, b))
 }
 
 /// Which window to act on, described the way a user thinks of it rather than by the
@@ -143,7 +167,7 @@ pub fn capture_matching_window(
     budget: Duration,
 ) -> Result<CapturedImage, CaptureError> {
     let tl = resolve_window(client.toplevels(), filter)?.clone();
-    frame_to_image(client.capture_toplevel_once(&tl, budget)?)
+    capture_to_image(client, budget, |c, b| c.capture_toplevel_once(&tl, b))
 }
 
 /// A captured output paired with its geometry, for compositing a region.
@@ -166,7 +190,7 @@ pub fn capture_all(
     }
     let mut caps = Vec::with_capacity(outputs.len());
     for output in outputs {
-        let image = frame_to_image(client.capture_output_once(&output, budget)?)?;
+        let image = capture_to_image(client, budget, |c, b| c.capture_output_once(&output, b))?;
         caps.push(OutputCapture { output, image });
     }
     Ok(caps)
@@ -231,7 +255,7 @@ pub fn capture_region(
     }
     let mut caps = Vec::with_capacity(outputs.len());
     for output in outputs {
-        let image = frame_to_image(client.capture_output_once(&output, budget)?)?;
+        let image = capture_to_image(client, budget, |c, b| c.capture_output_once(&output, b))?;
         caps.push(OutputCapture { output, image });
     }
     composite(&caps, region)

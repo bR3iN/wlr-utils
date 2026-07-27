@@ -564,6 +564,10 @@ pub struct Client {
     /// or if the GPU path is unavailable (we then fall back to shm).
     #[cfg(feature = "gpu")]
     gbm: Option<GbmDevice<File>>,
+    /// Whether the zero-copy dma-buf path is off, either because `WLR_NO_GPU` is
+    /// set or because an import failed and [`Client::disable_gpu`] dropped us to
+    /// shm. Present in every build so callers need no `cfg`.
+    gpu_disabled: bool,
 }
 
 impl Client {
@@ -630,7 +634,27 @@ impl Client {
             open: HashMap::new(),
             #[cfg(feature = "gpu")]
             gbm: None,
+            gpu_disabled: std::env::var_os("WLR_NO_GPU").is_some(),
         })
+    }
+
+    /// Stop using the dma-buf path and capture into shm from now on. Call this when
+    /// an import fails: the buffers already handed to the compositor are dropped and
+    /// reallocated, so the next frame arrives as CPU pixels rather than as a
+    /// descriptor nothing can import.
+    pub fn disable_gpu(&mut self) {
+        if self.gpu_disabled {
+            return;
+        }
+        self.gpu_disabled = true;
+        for d in self.state.sessions.values_mut() {
+            d.dirty = true;
+        }
+    }
+
+    /// Whether the dma-buf path is off (see [`Client::disable_gpu`]).
+    pub fn gpu_disabled(&self) -> bool {
+        self.gpu_disabled
     }
 
     /// The currently known capturable windows.
@@ -1004,6 +1028,9 @@ impl Client {
     /// gbm/allocation failure) so the caller falls back to shm.
     #[cfg(feature = "gpu")]
     fn alloc_dmabuf(&mut self, id: &SessionId, w: u32, h: u32) -> Option<Buf> {
+        if self.gpu_disabled {
+            return None;
+        }
         let dmabuf_mgr = self.state.dmabuf.as_ref().cloned()?;
         let (formats, dev) = {
             let d = self.state.sessions.get(id)?;
