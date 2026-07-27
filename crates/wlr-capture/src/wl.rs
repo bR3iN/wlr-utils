@@ -575,7 +575,7 @@ impl Client {
     pub fn connect() -> Result<Self> {
         let conn = Connection::connect_to_env().context("Wayland connection")?;
         let (globals, mut queue) =
-            registry_queue_init::<State>(&conn).context("registre Wayland")?;
+            registry_queue_init::<State>(&conn).context("Wayland registry")?;
         let qh = queue.handle();
 
         let shm = globals.bind(&qh, 1..=1, ()).context("wl_shm")?;
@@ -959,7 +959,7 @@ impl Client {
             return Ok(());
         }
         if w == 0 || h == 0 {
-            return Err(CaptureError::msg("dimensions de capture nulles"));
+            return Err(CaptureError::msg("zero-sized capture"));
         }
 
         // Prefer dma-buf (GPU); fall back to shm if it isn't available/usable.
@@ -971,7 +971,7 @@ impl Client {
         #[cfg(not(feature = "gpu"))]
         let buf = self.alloc_shm(id, w, h)?;
         // Install the new buffer; the old one (if any) drops here, releasing it.
-        self.open.get_mut(id).context("session non ouverte")?.buf = Some(buf);
+        self.open.get_mut(id).context("session not open")?.buf = Some(buf);
         self.state.sessions.get_mut(id).unwrap().dirty = false;
         Ok(())
     }
@@ -1286,7 +1286,7 @@ struct ActState {
 pub fn activate_window(app_id: &str, title: &str, dup_index: usize) -> Result<()> {
     let conn = Connection::connect_to_env().context("Wayland connection")?;
     let (globals, mut queue) =
-        registry_queue_init::<ActState>(&conn).context("registre Wayland")?;
+        registry_queue_init::<ActState>(&conn).context("Wayland registry")?;
     let qh = queue.handle();
     let _mgr: ZwlrForeignToplevelManagerV1 = globals
         .bind(&qh, 1..=3, ())
@@ -1320,7 +1320,7 @@ pub fn activate_window(app_id: &str, title: &str, dup_index: usize) -> Result<()
 /// protocols (and therefore which features) are available.
 pub fn advertised_globals() -> Result<Vec<(String, u32)>> {
     let conn = Connection::connect_to_env().context("Wayland connection")?;
-    let (globals, _queue) = registry_queue_init::<ActState>(&conn).context("registre Wayland")?;
+    let (globals, _queue) = registry_queue_init::<ActState>(&conn).context("Wayland registry")?;
     let mut list = Vec::new();
     globals.contents().with_list(|globals| {
         for g in globals {

@@ -227,7 +227,7 @@ impl GpuReadback {
             .context("EGL dma-buf import unavailable (driver)")?;
         let (w, h) = (frame.width, frame.height);
         if w == 0 || h == 0 {
-            return Err(CaptureError::msg("dimensions de readback nulles"));
+            return Err(CaptureError::msg("zero-sized readback"));
         }
 
         self.egl
@@ -316,7 +316,7 @@ impl GpuReadback {
                 Ok(buf)
             } else {
                 Err(CaptureError::msg(format!(
-                    "FBO de readback incomplet (0x{status:x})"
+                    "incomplete readback FBO (0x{status:x})"
                 )))
             };
 
