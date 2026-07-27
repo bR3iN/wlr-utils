@@ -25,12 +25,18 @@ pub(crate) const EGL_LINUX_DMA_BUF_EXT: u32 = 0x3270;
 const EGL_WIDTH: i32 = 0x3057;
 const EGL_HEIGHT: i32 = 0x3056;
 const EGL_LINUX_DRM_FOURCC_EXT: i32 = 0x3271;
-const EGL_DMA_BUF_PLANE0_FD_EXT: i32 = 0x3272;
-const EGL_DMA_BUF_PLANE0_OFFSET_EXT: i32 = 0x3273;
-const EGL_DMA_BUF_PLANE0_PITCH_EXT: i32 = 0x3274;
-const EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT: i32 = 0x3443;
-const EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT: i32 = 0x3444;
 const EGL_ATTRIB_NONE: i32 = 0x3038;
+
+/// Per-plane attribute names, in plane order: fd, offset, pitch, modifier lo/hi.
+/// The enum values are not contiguous across planes (planes 0–2 come from
+/// `EGL_EXT_image_dma_buf_import`, plane 3 was added later), so they are tabulated
+/// rather than computed.
+const PLANE_ATTRS: [[i32; 5]; 4] = [
+    [0x3272, 0x3273, 0x3274, 0x3443, 0x3444],
+    [0x3275, 0x3276, 0x3277, 0x3445, 0x3446],
+    [0x3278, 0x3279, 0x327A, 0x3447, 0x3448],
+    [0x3440, 0x3441, 0x3442, 0x3449, 0x344A],
+];
 pub(crate) const GL_TEXTURE_2D: u32 = 0x0DE1;
 
 type EglCreateImageKhr =
@@ -66,29 +72,36 @@ pub(crate) fn load_dmabuf_egl(egl: &Egl, display: egl::Display) -> Option<Dmabuf
     })
 }
 
-/// Build the `EGL_LINUX_DMA_BUF_EXT` attribute list for a single-plane frame. The
-/// fd is only borrowed (EGL dups it in `eglCreateImageKHR`), so `frame` must outlive
-/// the import call.
-pub(crate) fn dmabuf_image_attribs(frame: &wl::DmabufFrame) -> [i32; 17] {
-    [
+/// Build the `EGL_LINUX_DMA_BUF_EXT` attribute list for `frame`. Every plane is
+/// described: a compressed modifier carries auxiliary planes, and importing it with
+/// only the first one is rejected (`EGL_BAD_MATCH`). The fds are only borrowed (EGL
+/// dups them in `eglCreateImageKHR`), so `frame` must outlive the import call.
+pub(crate) fn dmabuf_image_attribs(frame: &wl::DmabufFrame) -> Vec<i32> {
+    let mut a = vec![
         EGL_WIDTH,
         frame.width as i32,
         EGL_HEIGHT,
         frame.height as i32,
         EGL_LINUX_DRM_FOURCC_EXT,
         frame.fourcc as i32,
-        EGL_DMA_BUF_PLANE0_FD_EXT,
-        frame.fd.as_raw_fd(),
-        EGL_DMA_BUF_PLANE0_OFFSET_EXT,
-        frame.offset as i32,
-        EGL_DMA_BUF_PLANE0_PITCH_EXT,
-        frame.stride as i32,
-        EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT,
-        (frame.modifier & 0xffff_ffff) as i32,
-        EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT,
-        (frame.modifier >> 32) as i32,
-        EGL_ATTRIB_NONE,
-    ]
+    ];
+    for (plane, names) in frame.planes.iter().zip(PLANE_ATTRS) {
+        let [fd, offset, pitch, mod_lo, mod_hi] = names;
+        a.extend_from_slice(&[
+            fd,
+            plane.fd.as_raw_fd(),
+            offset,
+            plane.offset as i32,
+            pitch,
+            plane.stride as i32,
+            mod_lo,
+            (frame.modifier & 0xffff_ffff) as i32,
+            mod_hi,
+            (frame.modifier >> 32) as i32,
+        ]);
+    }
+    a.push(EGL_ATTRIB_NONE);
+    a
 }
 
 /// Headless EGL/GLES context for reading a capture dma-buf back to CPU RGBA pixels.
@@ -286,6 +299,79 @@ impl GpuReadback {
             self.gl.bind_texture(GL_TEXTURE_2D, None);
             self.gl.delete_texture(tex);
             result
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::os::fd::OwnedFd;
+
+    /// A frame with `n` planes, each with a distinct offset/stride so the attribute
+    /// list can be checked positionally. The fds are dup'd stdin — never imported.
+    fn frame(n: usize) -> wl::DmabufFrame {
+        let planes = (0..n)
+            .map(|i| wl::DmabufPlane {
+                fd: rustix::io::dup(std::io::stdin())
+                    .map(OwnedFd::from)
+                    .unwrap(),
+                offset: 100 + i as u32,
+                stride: 200 + i as u32,
+            })
+            .collect();
+        wl::DmabufFrame {
+            planes,
+            width: 64,
+            height: 32,
+            fourcc: 0x3432_5258,
+            modifier: 0x0100_0000_0000_0008,
+        }
+    }
+
+    /// Attribute lists are name/value pairs; look a name up.
+    fn get(attrs: &[i32], name: i32) -> Option<i32> {
+        attrs
+            .chunks_exact(2)
+            .find(|c| c[0] == name)
+            .map(|c| c[1])
+            .filter(|_| name != EGL_ATTRIB_NONE)
+    }
+
+    #[test]
+    fn single_plane_attribs() {
+        let a = dmabuf_image_attribs(&frame(1));
+        assert_eq!(get(&a, EGL_WIDTH), Some(64));
+        assert_eq!(get(&a, EGL_HEIGHT), Some(32));
+        assert_eq!(get(&a, PLANE_ATTRS[0][1]), Some(100));
+        assert_eq!(get(&a, PLANE_ATTRS[0][2]), Some(200));
+        assert_eq!(a.last(), Some(&EGL_ATTRIB_NONE));
+        // No plane 1 entry when there is only one plane.
+        assert_eq!(get(&a, PLANE_ATTRS[1][0]), None);
+    }
+
+    /// The Intel CCS layouts that issue #6 tripped on carry three planes.
+    #[test]
+    fn multi_plane_attribs_describe_every_plane() {
+        for n in 2..=4 {
+            let a = dmabuf_image_attribs(&frame(n));
+            for i in 0..n {
+                assert_eq!(
+                    get(&a, PLANE_ATTRS[i][1]),
+                    Some(100 + i as i32),
+                    "plane {i}"
+                );
+                assert_eq!(
+                    get(&a, PLANE_ATTRS[i][2]),
+                    Some(200 + i as i32),
+                    "plane {i}"
+                );
+                // The modifier is repeated on every plane, split in halves.
+                assert_eq!(get(&a, PLANE_ATTRS[i][3]), Some(8), "plane {i}");
+                assert_eq!(get(&a, PLANE_ATTRS[i][4]), Some(0x0100_0000), "plane {i}");
+            }
+            assert!(get(&a, PLANE_ATTRS[n - 1][0]).is_some());
+            assert_eq!(a.last(), Some(&EGL_ATTRIB_NONE));
         }
     }
 }

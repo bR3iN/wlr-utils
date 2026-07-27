@@ -42,6 +42,10 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
 /// DRM "invalid"/"let the driver choose" modifier sentinel — not a real layout.
 #[cfg(feature = "gpu")]
 const DRM_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
+
+/// Most planes `EGL_EXT_image_dma_buf_import(_modifiers)` can describe.
+#[cfg(feature = "gpu")]
+const MAX_DMABUF_PLANES: u32 = 4;
 use wayland_protocols::ext::{
     foreign_toplevel_list::v1::client::{
         ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
@@ -453,8 +457,11 @@ struct DmaBuf {
     height: u32,
     fourcc: u32,
     modifier: u64,
-    stride: u32,
-    offset: u32,
+    /// Plane count of the layout the driver picked. Compressed modifiers (Intel
+    /// CCS, AMD DCC) add auxiliary planes on top of the pixel data; each one must
+    /// be declared, or the buffer is malformed. Per-plane offsets and strides come
+    /// from `bo` on demand.
+    plane_count: u32,
 }
 
 #[cfg(feature = "gpu")]
@@ -477,12 +484,23 @@ pub enum Frame {
     Dmabuf(DmabufFrame),
 }
 
-/// dma-buf descriptor for zero-copy GL import on the UI thread. `fd` is owned by
-/// the receiver; `buf_id` identifies the swapchain slot so the importer can cache
+/// One plane of a dma-buf: its own fd, offset and stride.
+pub struct DmabufPlane {
+    /// Owned file descriptor backing the plane (closed when this is dropped).
+    pub fd: OwnedFd,
+    /// Byte offset of the plane within the buffer.
+    pub offset: u32,
+    /// Row stride in bytes.
+    pub stride: u32,
+}
+
+/// dma-buf descriptor for zero-copy GL import on the UI thread. The fds are owned
+/// by the receiver; `buf_id` identifies the swapchain slot so the importer can cache
 /// one GL texture per slot (their backing memory is stable).
 pub struct DmabufFrame {
-    /// Owned file descriptor backing the buffer (closed when this is dropped).
-    pub fd: OwnedFd,
+    /// Planes, in DRM order. A plain layout has one; compressed modifiers add
+    /// auxiliary planes. EGL accepts at most 4.
+    pub planes: Vec<DmabufPlane>,
     /// Width in pixels.
     pub width: u32,
     /// Height in pixels.
@@ -491,10 +509,6 @@ pub struct DmabufFrame {
     pub fourcc: u32,
     /// DRM format modifier (tiling/compression layout).
     pub modifier: u64,
-    /// Row stride in bytes.
-    pub stride: u32,
-    /// Byte offset of the plane within the buffer.
-    pub offset: u32,
 }
 
 /// A persistent capture session: source + session objects plus the reusable
@@ -1017,20 +1031,29 @@ impl Client {
                     BufferObjectFlags::RENDERING,
                 )
                 .ok()?;
-            let stride = bo.stride();
-            let offset = bo.offset(0);
             let modifier: u64 = bo.modifier().into();
-            let fd = bo.fd().ok()?;
+            let plane_count = bo.plane_count();
+            if plane_count == 0 || plane_count > MAX_DMABUF_PLANES {
+                if debug() {
+                    eprintln!("wlr-capture: dma-buf with {plane_count} planes is not importable");
+                }
+                return None;
+            }
 
+            // Every plane must be declared: the compositor rejects (or silently
+            // mis-imports) a buffer whose plane count doesn't match its modifier.
             let params = dmabuf_mgr.create_params(qh, ());
-            params.add(
-                fd.as_fd(),
-                0,
-                offset,
-                stride,
-                (modifier >> 32) as u32,
-                (modifier & 0xffff_ffff) as u32,
-            );
+            for i in 0..plane_count {
+                let fd = bo.fd_for_plane(i as i32).ok()?;
+                params.add(
+                    fd.as_fd(),
+                    i,
+                    bo.offset(i as i32),
+                    bo.stride_for_plane(i as i32),
+                    (modifier >> 32) as u32,
+                    (modifier & 0xffff_ffff) as u32,
+                );
+            }
             let buffer = params.create_immed(
                 w as i32,
                 h as i32,
@@ -1047,16 +1070,15 @@ impl Client {
                 height: h,
                 fourcc,
                 modifier,
-                stride,
-                offset,
+                plane_count,
             })
         };
 
         let buf = alloc_slot()?;
         if debug() {
             eprintln!(
-                "wlr-chooser: dma-buf {w}x{h} fourcc={fourcc:#010x} modifier={}",
-                buf.modifier
+                "wlr-capture: dma-buf {w}x{h} fourcc={fourcc:#010x} modifier={} planes={}",
+                buf.modifier, buf.plane_count
             );
         }
         Some(Buf::Dmabuf(buf))
@@ -1172,15 +1194,20 @@ fn harvest(buf: &Buf) -> Option<Frame> {
         }
         #[cfg(feature = "gpu")]
         Buf::Dmabuf(b) => {
-            let fd = b.bo.fd().ok()?;
+            let mut planes = Vec::with_capacity(b.plane_count as usize);
+            for i in 0..b.plane_count as i32 {
+                planes.push(DmabufPlane {
+                    fd: b.bo.fd_for_plane(i).ok()?,
+                    offset: b.bo.offset(i),
+                    stride: b.bo.stride_for_plane(i),
+                });
+            }
             Some(Frame::Dmabuf(DmabufFrame {
-                fd,
+                planes,
                 width: b.width,
                 height: b.height,
                 fourcc: b.fourcc,
                 modifier: b.modifier,
-                stride: b.stride,
-                offset: b.offset,
             }))
         }
     }
