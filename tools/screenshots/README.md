@@ -49,10 +49,10 @@ virtual-pointer injector:
 - **Why a virtual pointer?** A headless seat has no input devices, so it has no
   pointer capability and sway's `seat cursor` IPC delivers nothing to clients.
   `shots-pointer` creates a real virtual pointer, which the overlays then see.
-- **Why isolated per-crate builds?** Building the workspace together lets Cargo
-  feature-unification enable `wlr-capture/gpu`, which routes capture through
-  dma-buf + a GPU readback; the second EGL connection then hits
-  `eglCreateWindowSurface: BadAlloc`. Building each tool with its own
-  `cargo build -p` keeps it on the shm capture path.
+- **Builds.** One workspace build. This used to be one `cargo build -p` per crate,
+  to keep feature-unification from enabling `wlr-capture/gpu` — an overlay tool
+  would open a second EGL connection for its dma-buf readback and hit
+  `eglCreateWindowSurface: BadAlloc`. Single captures allocate shm directly since
+  1.6.0, so that second connection is gone.
 - Run scenes one at a time — they share a fixed nested IPC socket path and must
   not overlap. `capture.sh` already serialises them.

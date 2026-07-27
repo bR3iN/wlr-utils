@@ -27,21 +27,20 @@ if [ ! -f "$SHOTS_UBO/manifest.json" ] && command -v gh >/dev/null 2>&1; then
   fi
 fi
 
-# Build the tools, each in its OWN cargo invocation. Building them together lets
-# Cargo feature-unification enable wlr-capture/gpu (pulled in by another crate's
-# defaults); wlr-peek would then capture via dma-buf and crash its overlay with
-# `eglCreateWindowSurface: BadAlloc`. Isolated builds keep every tool on the shm
-# capture path, which the nested compositor needs.
+# Build every tool in one workspace invocation. This used to be one cargo call per
+# crate, to stop feature-unification from enabling wlr-capture/gpu: an overlay tool
+# would then open a second EGL connection for its dma-buf readback and die with
+# `eglCreateWindowSurface: BadAlloc`. Single captures allocate shm directly now, so
+# there is no second connection to trip over — and isolated builds would no longer
+# help anyway, since wlr-shot and wlr-peek enable `gpu` themselves.
 if [ -z "${SKIP_BUILD:-}" ]; then
   # The virtual pointer + keyboard injector (drives the overlays; holds Shift for
   # wlr-draw's spotlight and Tab for the exposé selection).
   [ -x "$SHOTS_POINTER" ] || ( cd "$SHOTS_DIR/pointer" && cargo build --release ) \
     || { shots_msg "injector build FAILED"; exit 1; }
-  for crate in wlr-draw wlr-chooser wlr-shot wlr-peek; do
-    shots_msg "build $crate"
-    ( cd "$SHOTS_REPO" && cargo build --release -p "$crate" ) \
-      || { shots_msg "build $crate FAILED"; exit 1; }
-  done
+  shots_msg "build the tools"
+  ( cd "$SHOTS_REPO" && cargo build --release -p wlr-utils ) \
+    || { shots_msg "build FAILED"; exit 1; }
 fi
 export SHOTS_BIN="$SHOTS_REPO/target/release"
 
