@@ -515,6 +515,10 @@ pub struct App {
     /// GPU dma-buf thumbnails: egui texture id + source pixel size, imported by
     /// the host. Looked up before `textures` when drawing a tile.
     native: HashMap<String, (egui::TextureId, egui::Vec2)>,
+    /// Sources whose dma-buf frames the GPU refused to import. Failure is
+    /// deterministic, so these will never get a preview: drawing them as
+    /// "loading" would be a lie that never resolves.
+    failed: HashSet<String>,
     icons: HashMap<String, egui::TextureHandle>,
     filter: String,
     mode: Mode,
@@ -553,6 +557,7 @@ impl App {
             sources: Vec::new(),
             textures: HashMap::new(),
             native: HashMap::new(),
+            failed: HashSet::new(),
             icons: HashMap::new(),
             filter: String::new(),
             mode: opts.mode,
@@ -655,8 +660,14 @@ impl App {
                 Msg::Dmabuf { key, frame } => {
                     // Imported by the host (it owns the GL context); the resulting
                     // texture samples the dma-buf directly (zero copy).
-                    if let Some(tex) = importer.import(&key, frame) {
-                        self.native.insert(key, tex);
+                    match importer.import(&key, frame) {
+                        Some(tex) => {
+                            self.native.insert(key.clone(), tex);
+                            self.failed.remove(&key);
+                        }
+                        None => {
+                            self.failed.insert(key);
+                        }
                     }
                 }
                 Msg::Icon { key, w, h, rgba } if w > 0 && h > 0 => {
@@ -668,6 +679,7 @@ impl App {
                 Msg::Drop { key } => {
                     self.textures.remove(&key);
                     self.native.remove(&key);
+                    self.failed.remove(&key);
                     self.icons.remove(&key);
                     importer.forget(&key);
                 }
@@ -683,6 +695,14 @@ impl App {
             return Some((id, size));
         }
         self.textures.get(key).map(|t| (t.id(), t.size_vec2()))
+    }
+
+    /// Whether this source's preview will never arrive, so the tile should say so
+    /// instead of showing a loading state forever.
+    fn preview_failed(&self, key: &str) -> bool {
+        self.failed.contains(key)
+            && !self.native.contains_key(key)
+            && !self.textures.contains_key(key)
     }
 
     fn visible(&self) -> Vec<&Source> {
@@ -951,7 +971,9 @@ impl App {
                 egui::Color32::WHITE,
             );
         } else {
-            let placeholder = if s.is_window {
+            let placeholder = if self.preview_failed(&s.key) {
+                tr!("preview-unavailable")
+            } else if s.is_window {
                 tr!("loading")
             } else {
                 s.title.clone()
@@ -1117,10 +1139,15 @@ impl App {
                 white,
             );
         } else {
+            let placeholder = if self.preview_failed(&s.key) {
+                tr!("preview-unavailable")
+            } else {
+                tr!("loading")
+            };
             p.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                tr!("loading"),
+                placeholder,
                 egui::FontId::proportional(18.0),
                 fade(t.text_dim),
             );

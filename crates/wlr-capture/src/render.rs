@@ -23,8 +23,14 @@ use wayland_client::{Connection, Proxy, protocol::wl_surface::WlSurface};
 /// egui texture. Returns the texture id + source pixel size.
 pub trait DmabufImporter {
     /// Import `frame` as a GL-backed egui texture, caching it under `key` (the
-    /// swapchain slot). Returns the texture id and the source pixel size, or `None`
-    /// if the import fails.
+    /// swapchain slot). Returns the texture id and the source pixel size.
+    ///
+    /// `None` means the import **failed**, not that the frame is still on its way:
+    /// this is only ever called with a frame in hand. The failure is deterministic
+    /// (same buffer, same driver), so a caller should record it and show something
+    /// other than a loading state rather than waiting for a frame that will never
+    /// import.
+    #[must_use]
     fn import(
         &mut self,
         key: &str,
