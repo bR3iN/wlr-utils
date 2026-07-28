@@ -253,7 +253,9 @@ cargo build --release -p wlr-draw
 
 ## Requirements
 
-- **GL stack** — `libegl1` at runtime; the overlay renders through EGL/GLES.
+- **GL stack** — `libegl1` at runtime; the overlay renders through EGL/GLES. The
+  freeze-frame capture goes through shared memory, so `--no-gpu` (or `WLR_NO_GPU=1`)
+  changes nothing here — it is accepted for consistency with the other tools.
 - **Compositor** — a wlroots one advertising `wlr-layer-shell` (sway, Hyprland, niri, …)
   for the always-on-top overlay. Plain annotation needs only that, at any version.
 - **Screen capture** (freeze-frame `Space`, save `w`) — additionally needs

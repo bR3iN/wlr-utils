@@ -24,7 +24,7 @@ the same report, so a single-tool install can produce it too.
 | `wlr-layer-shell` (`zwlr_layer_shell_v1`) | full-screen overlays | the region selector (`-s`), `wlr-peek loupe`/`color`, `wlr-switcher`, `wlr-chooser` |
 | `wlr-data-control` (`zwlr_data_control_manager_v1`) | clipboard copy | `-c`/`--clipboard` |
 | `keyboard-shortcuts-inhibit` (`zwp_keyboard_shortcuts_inhibit_manager_v1`) | grabbing keys under a layer-shell grab | `wlr-switcher` (so `Alt+Tab` reaches it) |
-| `linux-dmabuf` (`zwp_linux_dmabuf_v1`) | zero-copy GPU capture (optional; CPU `wl_shm` is the fallback) | the optional `gpu` build |
+| `linux-dmabuf` (`zwp_linux_dmabuf_v1`) | zero-copy GPU capture (CPU `wl_shm` is the fallback) | live previews: `wlr-chooser`, `wlr-switcher`, `wlr-peek mirror`, `wlr-shot record` |
 | `xdg-output` (`zxdg_output_manager_v1`) | accurate logical geometry (fractional scale, positions) | recommended; falls back to `wl_output` |
 | compositor IPC | "the active window" / "the current output" (`-a`, `--current-output`) | a per-compositor focus backend |
 
@@ -46,6 +46,21 @@ The tools **degrade gracefully**: on a Sway 1.11 / wlroots 0.19 compositor the s
 features all work, while window-only paths fail with a clear message (`wlr-switcher` says so
 and exits instead of showing an empty overlay; wlr-draw hides freeze/save when even screen
 capture is missing). Run `wlr-peek doctor` to see which of the two your compositor offers.
+
+### GPU capture
+
+Live previews allocate their capture buffer through gbm and import it as a GL
+texture, so no frame is copied through the CPU. Which DRM format modifier the
+driver picks decides the buffer's layout — Intel and AMD hand out compressed
+layouts with extra auxiliary planes, other drivers a single plane.
+
+If a driver refuses to import its own buffer, captures do not fail: the tools drop
+to shared memory and say so once. `--no-gpu` (or `WLR_NO_GPU=1`) forces that path
+from the start, and `doctor` reports the negotiated fourcc, modifier and plane
+count — quote its `GPU capture:` line in a bug report.
+
+Single captures (screenshots, colour picks, OCR) always use shared memory: they end
+up as CPU pixels anyway, so a GPU round trip would only cost an EGL context.
 
 ## Compositors
 

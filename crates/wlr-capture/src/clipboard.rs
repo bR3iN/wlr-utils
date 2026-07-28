@@ -43,7 +43,7 @@ struct ClipState {
 pub fn serve(mime: &str, data: Vec<u8>) -> Result<()> {
     let conn = Connection::connect_to_env().context("Wayland connection")?;
     let (globals, mut queue) =
-        registry_queue_init::<ClipState>(&conn).context("registre Wayland")?;
+        registry_queue_init::<ClipState>(&conn).context("Wayland registry")?;
     let qh = queue.handle();
 
     let mgr: ZwlrDataControlManagerV1 = globals.bind(&qh, 1..=2, ()).context(

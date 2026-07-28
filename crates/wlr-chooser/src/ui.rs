@@ -6,6 +6,7 @@
 
 use crate::tr;
 use std::collections::{HashMap, HashSet};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
@@ -174,7 +175,7 @@ enum Capturable {
 // SessionId (a wayland ObjectId) is used as a map key: its interior-mutable
 // "alive" flag is not part of Hash/Eq, so it is a sound key.
 #[allow(clippy::mutable_key_type)]
-pub fn capture_thread(tx: Sender<Msg>) {
+pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>) {
     let mut client = match wl::Client::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -285,6 +286,20 @@ pub fn capture_thread(tx: Sender<Msg>) {
                     break 'outer;
                 }
             }
+        }
+
+        // The UI could not import a dma-buf: capture into shm from now on, so the
+        // previews come back instead of merely reporting that they can't. The
+        // sessions are closed rather than just rebuffered — capture is incremental
+        // by damage, so a fresh buffer on a live session would stay empty until the
+        // source repaints, which a static window never does. They reopen below.
+        if gpu_failed.swap(false, Ordering::Relaxed) && !client.gpu_disabled() {
+            eprintln!("wlr-capture: dma-buf import failed; falling back to shm");
+            client.disable_gpu();
+            for (_, id) in sessions.drain() {
+                client.close_session(&id);
+            }
+            by_id.clear();
         }
 
         // Drive all sessions for one round: this blocks up to the round budget
@@ -515,6 +530,12 @@ pub struct App {
     /// GPU dma-buf thumbnails: egui texture id + source pixel size, imported by
     /// the host. Looked up before `textures` when drawing a tile.
     native: HashMap<String, (egui::TextureId, egui::Vec2)>,
+    /// Sources whose dma-buf frames the GPU refused to import. Failure is
+    /// deterministic, so these will never get a preview: drawing them as
+    /// "loading" would be a lie that never resolves.
+    failed: HashSet<String>,
+    /// Raised when an import fails, so the capture thread drops to shm.
+    gpu_failed: Arc<AtomicBool>,
     icons: HashMap<String, egui::TextureHandle>,
     filter: String,
     mode: Mode,
@@ -547,12 +568,20 @@ pub struct App {
 }
 
 impl App {
-    pub fn new(rx: Receiver<Msg>, out: Outcome, opts: Options, theme: Theme) -> Self {
+    pub fn new(
+        rx: Receiver<Msg>,
+        out: Outcome,
+        opts: Options,
+        theme: Theme,
+        gpu_failed: Arc<AtomicBool>,
+    ) -> Self {
         Self {
             rx,
             sources: Vec::new(),
             textures: HashMap::new(),
             native: HashMap::new(),
+            failed: HashSet::new(),
+            gpu_failed,
             icons: HashMap::new(),
             filter: String::new(),
             mode: opts.mode,
@@ -655,8 +684,16 @@ impl App {
                 Msg::Dmabuf { key, frame } => {
                     // Imported by the host (it owns the GL context); the resulting
                     // texture samples the dma-buf directly (zero copy).
-                    if let Some(tex) = importer.import(&key, frame) {
-                        self.native.insert(key, tex);
+                    match importer.import(&key, frame) {
+                        Some(tex) => {
+                            self.native.insert(key.clone(), tex);
+                            self.failed.remove(&key);
+                        }
+                        None => {
+                            self.failed.insert(key);
+                            // Ask the capture thread to switch this session to shm.
+                            self.gpu_failed.store(true, Ordering::Relaxed);
+                        }
                     }
                 }
                 Msg::Icon { key, w, h, rgba } if w > 0 && h > 0 => {
@@ -668,6 +705,7 @@ impl App {
                 Msg::Drop { key } => {
                     self.textures.remove(&key);
                     self.native.remove(&key);
+                    self.failed.remove(&key);
                     self.icons.remove(&key);
                     importer.forget(&key);
                 }
@@ -683,6 +721,14 @@ impl App {
             return Some((id, size));
         }
         self.textures.get(key).map(|t| (t.id(), t.size_vec2()))
+    }
+
+    /// Whether this source's preview will never arrive, so the tile should say so
+    /// instead of showing a loading state forever.
+    fn preview_failed(&self, key: &str) -> bool {
+        self.failed.contains(key)
+            && !self.native.contains_key(key)
+            && !self.textures.contains_key(key)
     }
 
     fn visible(&self) -> Vec<&Source> {
@@ -951,7 +997,9 @@ impl App {
                 egui::Color32::WHITE,
             );
         } else {
-            let placeholder = if s.is_window {
+            let placeholder = if self.preview_failed(&s.key) {
+                tr!("preview-unavailable")
+            } else if s.is_window {
                 tr!("loading")
             } else {
                 s.title.clone()
@@ -1117,10 +1165,15 @@ impl App {
                 white,
             );
         } else {
+            let placeholder = if self.preview_failed(&s.key) {
+                tr!("preview-unavailable")
+            } else {
+                tr!("loading")
+            };
             p.text(
                 rect.center(),
                 egui::Align2::CENTER_CENTER,
-                tr!("loading"),
+                placeholder,
                 egui::FontId::proportional(18.0),
                 fade(t.text_dim),
             );

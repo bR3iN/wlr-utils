@@ -268,7 +268,7 @@ mod fallback {
                         // If the device already opened, the handshake is gone, so surface
                         // a mid-stream failure on stderr rather than swallowing it.
                         if ready_tx.send(Err(e.to_string())).is_err() {
-                            eprintln!("wlr-shot: audio capture stopped: {e}");
+                            eprintln!("wlr-capture: audio capture stopped: {e}");
                         }
                     }
                 })

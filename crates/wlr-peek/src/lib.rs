@@ -20,6 +20,11 @@ mod i18n;
     about = "Inspect the screen on wlroots (colour picker, OCR)"
 )]
 struct Cli {
+    /// Capture through shared memory instead of the zero-copy dma-buf path.
+    /// Use it if previews or captures come out broken on your driver; also
+    /// settable with WLR_NO_GPU=1.
+    #[arg(long, global = true)]
+    no_gpu: bool,
     #[command(subcommand)]
     cmd: Cmd,
 }
@@ -84,6 +89,9 @@ enum Format {
 pub fn main() {
     crate::i18n::init();
     let cli = Cli::parse();
+    if cli.no_gpu {
+        wlr_capture::wl::disable_gpu_globally();
+    }
     let res = match cli.cmd {
         Cmd::Color(args) => color(args),
         Cmd::Loupe => loupe(),

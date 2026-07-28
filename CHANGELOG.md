@@ -4,6 +4,37 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.6.0 — 2026-07-28
+
+### Fixed
+
+- **dma-buf capture on Intel and AMD** ([#6](https://github.com/sjourdois/wlr-utils/issues/6)) —
+  compressed DRM modifiers carry auxiliary planes and only the first one was declared, so
+  the buffer could not be imported. `wlr-shot`/`wlr-peek` failed outright and
+  `wlr-chooser`/`wlr-switcher` showed empty previews.
+- Modifier attributes are only posted when `EGL_EXT_image_dma_buf_import_modifiers` is
+  present, instead of failing the import on drivers that lack it.
+
+### Added
+
+- **`--no-gpu`** (and `WLR_NO_GPU=1`) — capture through shared memory.
+- **`doctor` probes the GPU path for real**, reporting the negotiated fourcc, modifier and
+  plane count rather than trusting the advertised globals.
+- An automatic shm fallback when a dma-buf cannot be imported.
+
+### Changed
+
+- Single captures (screenshots, colour picks, OCR) use shared memory; live previews keep
+  the zero-copy path.
+- The `gpu` feature is on by default for `wlr-shot` and `wlr-peek` — bundle builds already
+  shipped it through feature unification.
+
+### Breaking
+
+- `wlr-capture`: `DmabufFrame` carries a `planes` vector instead of one `fd`/`stride`/
+  `offset`, and `DmabufImporter::import` returning `None` means the import failed. Shipped
+  as a minor version: the crate is published to let the binaries be.
+
 ## 1.5.0 — 2026-07-21
 
 ### Added

@@ -16,13 +16,16 @@ name = "wlr-shot"
 path = "src/main.rs"
 
 [features]
-default = ["i18n", "video", "audio"]
+default = ["i18n", "video", "audio", "gpu"]
 # Localised UI (the overlay hint) via Fluent. On by default; `--no-default-features`
 # builds English-only with no Fluent dependency.
 i18n = ["wlr-i18n/i18n", "dep:rust-embed"]
-# Off by default: screenshots only need CPU pixels (shm), so the shipped binary
-# avoids gbm / libgbm-dev. Enabling it builds the engine's zero-copy dma-buf capture
-# and reads frames back to CPU via `render::GpuReadback` before encoding.
+# Zero-copy dma-buf capture (links gbm). On by default, and on in practice anyway:
+# a bundle build enables it through Cargo feature unification with wlr-chooser, so
+# leaving it out of the defaults only made the declared build differ from the
+# shipped one. Single captures allocate in shm regardless (the engine picks the
+# path from the session intent); this feature matters to `record`. Disable at
+# runtime with --no-gpu.
 gpu = ["wlr-capture/gpu"]
 # The `record` subcommand: encode a capture stream to a video file (NVENC / VAAPI /
 # libx264) via the engine's `video` sink. On by default — disable it
@@ -37,14 +40,12 @@ audio = ["video", "wlr-capture/audio"]
 audio-fallback = ["audio", "wlr-capture/audio-fallback"]
 
 [dependencies]
-# Screenshots only need CPU pixels, so we build the engine without the GPU path
-# (no gbm) by default. The shm capture yields a ready-to-encode RGBA `CapturedImage`;
-# the optional `gpu` feature adds the dma-buf path + readback.
 # `overlay` (the frozen region selector) pulls the egui/EGL toolkit + `compose`
 # (source→image); `focus` adds active-window / current-output via compositor IPC.
-wlr-capture = { path = "../wlr-capture", version = "1.5.0", default-features = false, features = ["overlay", "focus"] }
+# The dma-buf path comes from this crate's `gpu` feature (above).
+wlr-capture = { path = "../wlr-capture", version = "1.6.0", default-features = false, features = ["overlay", "focus"] }
 # This crate owns its localised catalog (`i18n/`); wlr-i18n is the shared loader plumbing.
-wlr-i18n = { path = "../wlr-i18n", version = "1.5.0", default-features = false }
+wlr-i18n = { path = "../wlr-i18n", version = "1.6.0", default-features = false }
 # For `#[derive(RustEmbed)]` over `i18n/` (the `i18n` feature).
 rust-embed = { workspace = true, optional = true }
 anyhow.workspace = true
@@ -79,4 +80,4 @@ dist = false
 
 # Generates the English fallback table for the no-Fluent build.
 [build-dependencies]
-wlr-i18n = { path = "../wlr-i18n", version = "1.5.0", default-features = false }
+wlr-i18n = { path = "../wlr-i18n", version = "1.6.0", default-features = false }

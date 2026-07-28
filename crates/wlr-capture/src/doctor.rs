@@ -10,6 +10,54 @@
 use crate::error::{Context, Result};
 use crate::wl;
 
+/// Actually capture one frame through the GPU path and try to import it, rather
+/// than inferring from the advertised globals.
+///
+/// Advertising `zwp_linux_dmabuf_v1` says nothing about whether the buffer the
+/// driver hands us can be imported back: issue #6 was a compositor that ticked
+/// every box while every capture failed. This reports the layout that was actually
+/// negotiated, which is what a bug report needs.
+#[cfg(feature = "gpu")]
+fn gpu_probe() -> String {
+    use std::time::Duration;
+    let mut client = match wl::Client::connect() {
+        Ok(c) => c,
+        Err(e) => return format!("could not probe ({e})"),
+    };
+    let Some(output) = client.outputs().first().cloned() else {
+        return "no output to probe".to_string();
+    };
+    let frame = match client.probe_gpu_capture(&output, Duration::from_secs(2)) {
+        Ok(f) => f,
+        Err(e) => return format!("probe capture failed ({e})"),
+    };
+    let d = match frame {
+        wl::Frame::Shm(_) => {
+            return "not used (no dma-buf format negotiated); capturing through shm".to_string();
+        }
+        wl::Frame::Dmabuf(d) => d,
+    };
+    let layout = format!(
+        "fourcc {:#010x}, modifier {:#018x}, {} plane(s)",
+        d.fourcc,
+        d.modifier,
+        d.planes.len()
+    );
+    match crate::gl::GpuReadback::new().and_then(|mut rb| rb.readback(d)) {
+        Ok(_) => format!("working — {layout}"),
+        Err(e) => format!(
+            "BROKEN — {layout}: {e}. Captures still work (they fall back to shm); \
+             please report this with the line above."
+        ),
+    }
+}
+
+/// Without the `gpu` feature there is no dma-buf path to probe.
+#[cfg(not(feature = "gpu"))]
+fn gpu_probe() -> String {
+    "not built in (shm capture only)".to_string()
+}
+
 /// `(interface, what it enables)`, ordered roughly by importance.
 const CHECKS: &[(&str, &str)] = &[
     ("ext_image_copy_capture_manager_v1", "capture frames (core)"),
@@ -100,6 +148,10 @@ pub fn report(tool: &str, version: &str) -> Result<()> {
              (wlroots ≥ 0.20 / Sway ≥ 1.12). Screen capture still works; only window-only \
              features are unavailable (wlr-switcher exits with a notice)."
         );
+    }
+
+    if core {
+        println!("GPU capture: {}", gpu_probe());
     }
 
     // Focus IPC (active-window / current-output) needs the `focus` feature; a lean

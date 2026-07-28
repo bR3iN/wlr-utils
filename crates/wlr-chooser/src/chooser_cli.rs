@@ -20,6 +20,11 @@ use std::time::Instant;
 #[derive(Parser)]
 #[command(name = "wlr-chooser", version, about)]
 struct Cli {
+    /// Capture through shared memory instead of the zero-copy dma-buf path.
+    /// Use it if previews or captures come out broken on your driver; also
+    /// settable with WLR_NO_GPU=1.
+    #[arg(long)]
+    no_gpu: bool,
     /// Show only windows
     #[arg(short = 'w', long, group = "what")]
     windows: bool,
@@ -47,6 +52,9 @@ struct Cli {
 pub fn main() {
     let t0 = Instant::now();
     let cli = Cli::parse();
+    if cli.no_gpu {
+        wlr_capture::wl::disable_gpu_globally();
+    }
     i18n::init();
 
     if cli.doctor {

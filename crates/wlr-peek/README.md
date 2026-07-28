@@ -188,8 +188,11 @@ uses `xdg-shell`, and `color --clipboard` needs `zwlr_data_control_manager_v1`. 
 doctor` prints exactly what your compositor advertises; see
 [COMPATIBILITY.md](../../COMPATIBILITY.md) for the full matrix.
 
-- **GL stack** — `libegl1` at runtime (the overlays render through EGL/GLES). Capture is
-  CPU shm, so **no `libgbm`** is needed (the `gpu` feature is off by default).
+- **GL stack** — `libegl1` at runtime (the overlays render through EGL/GLES), plus
+  `libgbm` for the zero-copy dma-buf path `mirror` streams through (the `gpu` feature, on
+  by default). One-shot reads (`color`, `ocr`) capture through shared memory regardless.
+  `--no-gpu` (or `WLR_NO_GPU=1`) forces the shm path; `wlr-peek doctor` reports whether the
+  dma-buf path works here.
 - **OCR** (`ocr`, `grep`; on by default) — links the system `libtesseract`/`libleptonica`
   (`-dev` packages, plus `clang` for the bindings); the matching `tesseract-ocr-<lang>`
   data pack must be installed at runtime (default `eng`). `--no-default-features` builds an

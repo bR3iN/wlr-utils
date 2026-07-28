@@ -23,16 +23,18 @@ The reusable bricks plus the overlay UI helpers they share:
   (`ext-foreign-toplevel-list-v1`) and captures them at full resolution via
   `ext-image-capture-source-v1` + `ext-image-copy-capture-v1`. It computes the
   format-correct stride (so it works where `grim 1.5` fails with "Invalid
-  stride"), and prefers a zero-copy GPU dma-buf path (allocated through `gbm`)
-  with an automatic CPU shm fallback. Capture is occlusion-independent and
-  damage-driven (windows on other workspaces stream live).
+  stride"). Live sessions take a zero-copy dma-buf path (allocated through `gbm`,
+  every plane of the modifier declared); single captures, which end up as CPU
+  pixels anyway, allocate shm directly. An import the driver refuses drops the
+  client to shm (`Client::disable_gpu`, `WLR_NO_GPU`). Capture is
+  occlusion-independent and damage-driven (windows on other workspaces stream live).
 - **`gl`** — the EGL/GL dma-buf core: import a capture dma-buf as a GL texture
   (`EGL_EXT_image_dma_buf_import`) and `GpuReadback`, a headless offscreen context
   that reads such a dma-buf back to CPU RGBA8 (`glReadPixels` on a 1×1 pbuffer).
 - **`clipboard`** — put a captured blob on the wlroots clipboard via
   `zwlr_data_control_v1` (the protocol `wl-copy` uses).
 - **`sink`** — `FrameSink`, the common output seam for screenshot/record/timelapse;
-  the default dma-buf path reads back through `GpuReadback`.
+  dma-buf frames read back through `GpuReadback` unless a sink consumes them on the GPU.
 - **`stream` / `diff`** — a shared capture-session driver (arm / poll / reopen /
   give-up) and a frame-difference metric, shared by the mirror, recorder and monitor.
 - **`capture` / `focus`** *(features)* — resolve a source to a `CapturedImage`

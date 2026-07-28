@@ -42,6 +42,21 @@ use wayland_protocols_wlr::foreign_toplevel::v1::client::{
 /// DRM "invalid"/"let the driver choose" modifier sentinel — not a real layout.
 #[cfg(feature = "gpu")]
 const DRM_MOD_INVALID: u64 = 0x00ff_ffff_ffff_ffff;
+
+/// Process-wide off switch for the dma-buf path, set once at startup by a
+/// `--no-gpu` flag. A per-`Client` setter would have to be threaded through every
+/// construction site in every tool for a decision that is taken once for the whole
+/// run; `WLR_NO_GPU` covers the same ground from the environment.
+static GPU_DISABLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Capture through shm in every [`Client`] created from now on. See [`GPU_DISABLED`].
+pub fn disable_gpu_globally() {
+    GPU_DISABLED.store(true, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// Most planes `EGL_EXT_image_dma_buf_import(_modifiers)` can describe.
+#[cfg(feature = "gpu")]
+const MAX_DMABUF_PLANES: u32 = 4;
 use wayland_protocols::ext::{
     foreign_toplevel_list::v1::client::{
         ext_foreign_toplevel_handle_v1::{self, ExtForeignToplevelHandleV1},
@@ -385,6 +400,13 @@ struct SessionData {
     frame_failed: Option<FailureReason>,
     /// Terminal: the session/source stopped and won't produce more frames.
     stopped: bool,
+    /// Set for a single capture that is closed right after (`capture_*_once`).
+    ///
+    /// Such a capture ends up as CPU pixels anyway — it is encoded, cropped or
+    /// sampled — so importing a dma-buf only to read it straight back would build a
+    /// whole EGL context per call for nothing. Live sessions, whose frames are
+    /// sampled as GL textures, keep the zero-copy path.
+    one_shot: bool,
 }
 
 /// A reusable buffer backing one session, kept alive between frames. Either a
@@ -453,8 +475,11 @@ struct DmaBuf {
     height: u32,
     fourcc: u32,
     modifier: u64,
-    stride: u32,
-    offset: u32,
+    /// Plane count of the layout the driver picked. Compressed modifiers (Intel
+    /// CCS, AMD DCC) add auxiliary planes on top of the pixel data; each one must
+    /// be declared, or the buffer is malformed. Per-plane offsets and strides come
+    /// from `bo` on demand.
+    plane_count: u32,
 }
 
 #[cfg(feature = "gpu")]
@@ -477,12 +502,23 @@ pub enum Frame {
     Dmabuf(DmabufFrame),
 }
 
-/// dma-buf descriptor for zero-copy GL import on the UI thread. `fd` is owned by
-/// the receiver; `buf_id` identifies the swapchain slot so the importer can cache
+/// One plane of a dma-buf: its own fd, offset and stride.
+pub struct DmabufPlane {
+    /// Owned file descriptor backing the plane (closed when this is dropped).
+    pub fd: OwnedFd,
+    /// Byte offset of the plane within the buffer.
+    pub offset: u32,
+    /// Row stride in bytes.
+    pub stride: u32,
+}
+
+/// dma-buf descriptor for zero-copy GL import on the UI thread. The fds are owned
+/// by the receiver; `buf_id` identifies the swapchain slot so the importer can cache
 /// one GL texture per slot (their backing memory is stable).
 pub struct DmabufFrame {
-    /// Owned file descriptor backing the buffer (closed when this is dropped).
-    pub fd: OwnedFd,
+    /// Planes, in DRM order. A plain layout has one; compressed modifiers add
+    /// auxiliary planes. EGL accepts at most 4.
+    pub planes: Vec<DmabufPlane>,
     /// Width in pixels.
     pub width: u32,
     /// Height in pixels.
@@ -491,10 +527,6 @@ pub struct DmabufFrame {
     pub fourcc: u32,
     /// DRM format modifier (tiling/compression layout).
     pub modifier: u64,
-    /// Row stride in bytes.
-    pub stride: u32,
-    /// Byte offset of the plane within the buffer.
-    pub offset: u32,
 }
 
 /// A persistent capture session: source + session objects plus the reusable
@@ -550,6 +582,10 @@ pub struct Client {
     /// or if the GPU path is unavailable (we then fall back to shm).
     #[cfg(feature = "gpu")]
     gbm: Option<GbmDevice<File>>,
+    /// Whether the zero-copy dma-buf path is off, either because `WLR_NO_GPU` is
+    /// set or because an import failed and [`Client::disable_gpu`] dropped us to
+    /// shm. Present in every build so callers need no `cfg`.
+    gpu_disabled: bool,
 }
 
 impl Client {
@@ -557,7 +593,7 @@ impl Client {
     pub fn connect() -> Result<Self> {
         let conn = Connection::connect_to_env().context("Wayland connection")?;
         let (globals, mut queue) =
-            registry_queue_init::<State>(&conn).context("registre Wayland")?;
+            registry_queue_init::<State>(&conn).context("Wayland registry")?;
         let qh = queue.handle();
 
         let shm = globals.bind(&qh, 1..=1, ()).context("wl_shm")?;
@@ -616,7 +652,28 @@ impl Client {
             open: HashMap::new(),
             #[cfg(feature = "gpu")]
             gbm: None,
+            gpu_disabled: GPU_DISABLED.load(std::sync::atomic::Ordering::Relaxed)
+                || std::env::var_os("WLR_NO_GPU").is_some(),
         })
+    }
+
+    /// Stop using the dma-buf path and capture into shm from now on. Call this when
+    /// an import fails: the buffers already handed to the compositor are dropped and
+    /// reallocated, so the next frame arrives as CPU pixels rather than as a
+    /// descriptor nothing can import.
+    pub fn disable_gpu(&mut self) {
+        if self.gpu_disabled {
+            return;
+        }
+        self.gpu_disabled = true;
+        for d in self.state.sessions.values_mut() {
+            d.dirty = true;
+        }
+    }
+
+    /// Whether the dma-buf path is off (see [`Client::disable_gpu`]).
+    pub fn gpu_disabled(&self) -> bool {
+        self.gpu_disabled
     }
 
     /// The currently known capturable windows.
@@ -724,10 +781,7 @@ impl Client {
         output: &Output,
         budget: Duration,
     ) -> Result<Frame, CaptureError> {
-        let id = self.open_output_session(output)?;
-        let r = self.poll_one(&id, budget);
-        self.close_session(&id);
-        r
+        self.capture_output_frame(output, budget, true)
     }
 
     /// One-shot: capture a single frame of `toplevel`, then tear the session down.
@@ -737,9 +791,40 @@ impl Client {
         budget: Duration,
     ) -> Result<Frame, CaptureError> {
         let id = self.open_toplevel_session(toplevel)?;
+        if let Some(d) = self.state.sessions.get_mut(&id) {
+            d.one_shot = true;
+        }
         let r = self.poll_one(&id, budget);
         self.close_session(&id);
         r
+    }
+
+    /// Capture one frame from `output`, through the shm path (`one_shot`) or the
+    /// live dma-buf path.
+    fn capture_output_frame(
+        &mut self,
+        output: &Output,
+        budget: Duration,
+        one_shot: bool,
+    ) -> Result<Frame, CaptureError> {
+        let id = self.open_output_session(output)?;
+        if one_shot && let Some(d) = self.state.sessions.get_mut(&id) {
+            d.one_shot = true;
+        }
+        let r = self.poll_one(&id, budget);
+        self.close_session(&id);
+        r
+    }
+
+    /// Capture one frame the way a live consumer would, so the dma-buf path is
+    /// exercised even for a single frame. This is what `doctor` probes with;
+    /// ordinary single captures want [`Client::capture_output_once`].
+    pub fn probe_gpu_capture(
+        &mut self,
+        output: &Output,
+        budget: Duration,
+    ) -> Result<Frame, CaptureError> {
+        self.capture_output_frame(output, budget, false)
     }
 
     /// Poll until session `id` yields a frame, it stops, or `budget` elapses.
@@ -921,7 +1006,7 @@ impl Client {
             return Ok(());
         }
         if w == 0 || h == 0 {
-            return Err(CaptureError::msg("dimensions de capture nulles"));
+            return Err(CaptureError::msg("zero-sized capture"));
         }
 
         // Prefer dma-buf (GPU); fall back to shm if it isn't available/usable.
@@ -933,7 +1018,7 @@ impl Client {
         #[cfg(not(feature = "gpu"))]
         let buf = self.alloc_shm(id, w, h)?;
         // Install the new buffer; the old one (if any) drops here, releasing it.
-        self.open.get_mut(id).context("session non ouverte")?.buf = Some(buf);
+        self.open.get_mut(id).context("session not open")?.buf = Some(buf);
         self.state.sessions.get_mut(id).unwrap().dirty = false;
         Ok(())
     }
@@ -990,6 +1075,9 @@ impl Client {
     /// gbm/allocation failure) so the caller falls back to shm.
     #[cfg(feature = "gpu")]
     fn alloc_dmabuf(&mut self, id: &SessionId, w: u32, h: u32) -> Option<Buf> {
+        if self.gpu_disabled || self.state.sessions.get(id).is_some_and(|d| d.one_shot) {
+            return None;
+        }
         let dmabuf_mgr = self.state.dmabuf.as_ref().cloned()?;
         let (formats, dev) = {
             let d = self.state.sessions.get(id)?;
@@ -1017,20 +1105,29 @@ impl Client {
                     BufferObjectFlags::RENDERING,
                 )
                 .ok()?;
-            let stride = bo.stride();
-            let offset = bo.offset(0);
             let modifier: u64 = bo.modifier().into();
-            let fd = bo.fd().ok()?;
+            let plane_count = bo.plane_count();
+            if plane_count == 0 || plane_count > MAX_DMABUF_PLANES {
+                if debug() {
+                    eprintln!("wlr-capture: dma-buf with {plane_count} planes is not importable");
+                }
+                return None;
+            }
 
+            // Every plane must be declared: the compositor rejects (or silently
+            // mis-imports) a buffer whose plane count doesn't match its modifier.
             let params = dmabuf_mgr.create_params(qh, ());
-            params.add(
-                fd.as_fd(),
-                0,
-                offset,
-                stride,
-                (modifier >> 32) as u32,
-                (modifier & 0xffff_ffff) as u32,
-            );
+            for i in 0..plane_count {
+                let fd = bo.fd_for_plane(i as i32).ok()?;
+                params.add(
+                    fd.as_fd(),
+                    i,
+                    bo.offset(i as i32),
+                    bo.stride_for_plane(i as i32),
+                    (modifier >> 32) as u32,
+                    (modifier & 0xffff_ffff) as u32,
+                );
+            }
             let buffer = params.create_immed(
                 w as i32,
                 h as i32,
@@ -1047,16 +1144,15 @@ impl Client {
                 height: h,
                 fourcc,
                 modifier,
-                stride,
-                offset,
+                plane_count,
             })
         };
 
         let buf = alloc_slot()?;
         if debug() {
             eprintln!(
-                "wlr-chooser: dma-buf {w}x{h} fourcc={fourcc:#010x} modifier={}",
-                buf.modifier
+                "wlr-capture: dma-buf {w}x{h} fourcc={fourcc:#010x} modifier={} planes={}",
+                buf.modifier, buf.plane_count
             );
         }
         Some(Buf::Dmabuf(buf))
@@ -1077,7 +1173,7 @@ impl Client {
             .ok()?;
         let device = GbmDevice::new(file).ok()?;
         if debug() {
-            eprintln!("wlr-chooser: gbm device {}", path.display());
+            eprintln!("wlr-capture: gbm device {}", path.display());
         }
         self.gbm = Some(device);
         Some(())
@@ -1152,10 +1248,10 @@ fn render_node_for(dev: Option<u64>) -> std::path::PathBuf {
         .unwrap_or_else(|| PathBuf::from("/dev/dri/renderD128"))
 }
 
-/// Whether verbose capture diagnostics are enabled (`WLR_CHOOSER_DEBUG`).
+/// Whether verbose capture diagnostics are enabled (`WLR_UTILS_DEBUG`).
 #[cfg(feature = "gpu")]
 fn debug() -> bool {
-    std::env::var_os("WLR_CHOOSER_DEBUG").is_some()
+    std::env::var_os("WLR_UTILS_DEBUG").is_some()
 }
 
 /// Turn a ready capture into a [`Frame`] for the UI. shm is read back + converted
@@ -1172,15 +1268,20 @@ fn harvest(buf: &Buf) -> Option<Frame> {
         }
         #[cfg(feature = "gpu")]
         Buf::Dmabuf(b) => {
-            let fd = b.bo.fd().ok()?;
+            let mut planes = Vec::with_capacity(b.plane_count as usize);
+            for i in 0..b.plane_count as i32 {
+                planes.push(DmabufPlane {
+                    fd: b.bo.fd_for_plane(i).ok()?,
+                    offset: b.bo.offset(i),
+                    stride: b.bo.stride_for_plane(i),
+                });
+            }
             Some(Frame::Dmabuf(DmabufFrame {
-                fd,
+                planes,
                 width: b.width,
                 height: b.height,
                 fourcc: b.fourcc,
                 modifier: b.modifier,
-                stride: b.stride,
-                offset: b.offset,
             }))
         }
     }
@@ -1232,7 +1333,7 @@ struct ActState {
 pub fn activate_window(app_id: &str, title: &str, dup_index: usize) -> Result<()> {
     let conn = Connection::connect_to_env().context("Wayland connection")?;
     let (globals, mut queue) =
-        registry_queue_init::<ActState>(&conn).context("registre Wayland")?;
+        registry_queue_init::<ActState>(&conn).context("Wayland registry")?;
     let qh = queue.handle();
     let _mgr: ZwlrForeignToplevelManagerV1 = globals
         .bind(&qh, 1..=3, ())
@@ -1266,7 +1367,7 @@ pub fn activate_window(app_id: &str, title: &str, dup_index: usize) -> Result<()
 /// protocols (and therefore which features) are available.
 pub fn advertised_globals() -> Result<Vec<(String, u32)>> {
     let conn = Connection::connect_to_env().context("Wayland connection")?;
-    let (globals, _queue) = registry_queue_init::<ActState>(&conn).context("registre Wayland")?;
+    let (globals, _queue) = registry_queue_init::<ActState>(&conn).context("Wayland registry")?;
     let mut list = Vec::new();
     globals.contents().with_list(|globals| {
         for g in globals {
