@@ -69,44 +69,23 @@ Runtime libraries:
 
 ## Install
 
-**Everything at once** — the `wlr-utils` crate bundles all five binaries
-(`wlr-chooser`, `wlr-switcher`, `wlr-peek`, `wlr-shot`, `wlr-draw`):
+Every route below installs the same five binaries (`wlr-chooser`, `wlr-switcher`,
+`wlr-peek`, `wlr-shot`, `wlr-draw`).
+
+### Arch Linux
 
 ```sh
-cargo install wlr-utils
+paru -S wlr-utils-bin    # prebuilt from the release (fast)
+paru -S wlr-utils        # …or built from source
 ```
 
-Or grab the **prebuilt bundle** from the
-[latest release](https://github.com/sjourdois/wlr-utils/releases/latest) — one archive
-with every binary, plus a one-line installer:
+Both ship the same tools and conflict with each other — pick one. Any AUR helper works.
 
-```sh
-curl --proto '=https' --tlsv1.2 -LsSf \
-  https://github.com/sjourdois/wlr-utils/releases/latest/download/wlr-utils-installer.sh | sh
-```
+### Debian / Ubuntu
 
-**À la carte** — each tool is also its own crate, for a lighter, single-purpose install
-(only the system deps that tool needs). Per-tool instructions live in each crate's README:
-
-```sh
-cargo install wlr-chooser        # window/screen picker + wlr-switcher (Alt-Tab/exposé)
-cargo install wlr-peek           # colour picker, loupe, OCR, live mirror, watch
-cargo install wlr-shot           # screenshots + recording
-cargo install wlr-draw           # annotation overlay
-```
-
-**Arch Linux (AUR)** — two packages, install with any helper (`paru`, `yay`, …):
-
-```sh
-paru -S wlr-utils-bin    # prebuilt binaries from the release (fast)
-paru -S wlr-utils        # …or build the whole suite from source
-```
-
-Both ship the same five tools and conflict with each other; pick one.
-
-**Debian / Ubuntu `.deb`** — a single package with the whole suite is attached to every
-release, built **per distro** so it links against that distro's FFmpeg / Leptonica. Pick the
-one matching your system:
+One package with the whole suite is attached to every
+[release](https://github.com/sjourdois/wlr-utils/releases/latest), built **per distro** so
+it links against that distro's FFmpeg / Leptonica. Pick the matching asset:
 
 | Distro | Asset suffix |
 | --- | --- |
@@ -116,28 +95,53 @@ one matching your system:
 | Ubuntu 22.04 (jammy) | `…_amd64.jammy.deb` — screenshots only, no `wlr-shot record` |
 | Ubuntu 24.04 (noble) / 26.04 | `…_amd64.noble.deb` / `…_amd64.ubuntu2604.deb` |
 
-The Ubuntu 22.04 `.deb` is screenshots-only: its PipeWire / FFmpeg are too old to build the
-recorder, so `wlr-shot record` is omitted. For recording there, use `cargo install
-wlr-utils` or the prebuilt tarball.
+```sh
+sudo apt install ./wlr-utils_*_amd64.trixie.deb   # apt pulls the dependencies in
+```
+
+Ubuntu 22.04's PipeWire / FFmpeg are too old to build the recorder, so that `.deb` omits
+`wlr-shot record`; install from source there if you need it.
 
 > [!IMPORTANT]
 > These `.deb`s link **dynamically** against the FFmpeg (`libavutil`) and Leptonica
 > (`liblept`) of the distro they were built on. If your installed versions don't match
 > (different release, backports, a soname your distro doesn't ship), the tool won't start —
-> `error while loading shared libraries: libavutil.so.NN` / `liblept.so.N`. In that case,
-> **build from source** instead (below): a source build links against whatever you have.
+> `error while loading shared libraries: libavutil.so.NN` / `liblept.so.N`. Build from
+> source instead: it links against whatever you have.
 
-**From source** — `cargo install wlr-utils` (above) or the whole workspace; the OCR/video
-features link the system Tesseract/FFmpeg `-dev` packages (see each tool's README), and the
-`gpu` feature needs `libgbm-dev` at build time:
+### Prebuilt binaries
+
+One archive with every binary, for any distro — no Rust toolchain needed:
 
 ```sh
-cargo build --release            # builds all binaries
+curl --proto '=https' --tlsv1.2 -LsSf \
+  https://github.com/sjourdois/wlr-utils/releases/latest/download/wlr-utils-installer.sh | sh
 ```
+
+### From source
+
+```sh
+cargo install wlr-utils          # the whole suite
+```
+
+Each tool is also its own crate, if you want just one — it then pulls only that tool's
+system dependencies (see its README):
+
+```sh
+cargo install wlr-chooser        # window/screen picker + wlr-switcher (Alt-Tab/exposé)
+cargo install wlr-peek           # colour picker, loupe, OCR, live mirror, watch
+cargo install wlr-shot           # screenshots + recording
+cargo install wlr-draw           # annotation overlay
+```
+
+Building the checkout directly works the same way (`cargo build --release` puts every
+binary in `target/release`). Either route needs the `-dev` packages of the features you
+build: Tesseract for OCR, FFmpeg for recording, and `libgbm-dev` for the GPU capture path.
 
 ### Uninstall
 
-`cargo install` drops the binaries in `~/.cargo/bin`. Remove the bundle with
+Package installs come off the usual way (`paru -R wlr-utils-bin`, `apt remove wlr-utils`).
+A `cargo install` drops the binaries in `~/.cargo/bin`; remove the bundle with
 `cargo uninstall wlr-utils`, or an individual tool the same way:
 
 ```sh
