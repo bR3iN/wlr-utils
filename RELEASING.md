@@ -77,12 +77,14 @@ grep 'for pkg in' .github/workflows/publish.yml   # every crate in the publish o
      `wlr-capture wlr-i18n wlr-chooser wlr-shot wlr-peek wlr-draw wlr-utils`).
    - The cargo-dist `release` workflow builds the binaries + installer and creates
      the GitHub Release.
-   - The `deb` workflow builds the `.deb` per distro and attaches it to that release
+   - `deb` and `aur` are **chained to `release`** (a `workflow_run` trigger), because
+     both need the release it creates. They take the tag from the upstream run, so
+     they check out that tag rather than the default branch.
+   - The `deb` workflow builds the `.deb` per distro and attaches it to the release
      (only crates with `[package.metadata.deb]` ship there).
    - The `aur` workflow publishes both AUR packages from an Arch container: it rewrites
      `pkgver` from the tag, runs `updpkgsums`, regenerates `.SRCINFO` and pushes. The
-     `pkgver` committed in `packaging/aur/` is only kept in sync for readability. The
-     `-bin` package waits for the cargo-dist archive, so it runs after `release`.
+     `pkgver` committed in `packaging/aur/` is only kept in sync for readability.
 5. **Replay a failed tag workflow** without re-tagging: `deb` and `aur` take a
    `workflow_dispatch` with the tag as an input; `publish` takes one on the version
    currently in `Cargo.toml`.

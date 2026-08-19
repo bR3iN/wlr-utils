@@ -6,15 +6,16 @@ name: aur
 # dedicated AUR deploy key (secret AUR_SSH_KEY) whose public half is registered
 # on the AUR account — the maintainer's personal signing key never enters CI.
 #
-# It triggers on the tag push (a GITHUB_TOKEN-created release does not emit a
-# `release: published` event, so this can't key off that). The -bin package waits
-# for the cargo-dist archive to be uploaded first; the source package only needs
-# the git tag. Without AUR_SSH_KEY set, it still builds and validates each package
-# but skips the push.
+# It keys off the `Release` workflow finishing, not off a `release: published`
+# event — a release created by the GITHUB_TOKEN never emits that one. Without
+# AUR_SSH_KEY set, it still builds and validates each package but skips the push.
 
 on:
-  push:
-    tags: ['v*']
+  # Chained to the cargo-dist `Release` workflow rather than to the tag push: the
+  # -bin package is built from the archive that workflow uploads.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -23,6 +24,7 @@ on:
 
 jobs:
   publish:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v')) }}
     runs-on: ubuntu-latest
     container: archlinux:base-devel
     permissions:
@@ -41,24 +43,16 @@ jobs:
       - name: Resolve the release version
         id: ver
         run: |
-          tag="${{ github.event.inputs.tag || github.ref_name }}"
+          tag="${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}"
           echo "tag=$tag" >>"$GITHUB_OUTPUT"
           echo "pkgver=${tag#v}" >>"$GITHUB_OUTPUT"
 
       - name: Install tooling
         run: pacman -Syu --noconfirm --needed git openssh pacman-contrib rust clang curl
 
-      - name: Wait for the release archive (bin package)
-        if: matrix.name == 'wlr-utils-bin'
-        run: |
-          url="https://github.com/${{ github.repository }}/releases/download/${{ steps.ver.outputs.tag }}/wlr-utils-x86_64-unknown-linux-gnu.tar.xz"
-          for _ in $(seq 1 40); do
-            curl -sfI "$url" >/dev/null && exit 0
-            echo "waiting for $url…"; sleep 30
-          done
-          echo "release archive still missing after waiting" >&2; exit 1
-
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ steps.ver.outputs.tag }}
 
       - name: Prepare the PKGBUILD
         working-directory: packaging/aur

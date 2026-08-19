@@ -1,8 +1,12 @@
 name: Debian package
 
 on:
-  push:
-    tags: ['v*']
+  # Chained to the cargo-dist `Release` workflow rather than to the tag push: the
+  # .debs are attached to the GitHub release it creates, so there is nothing to
+  # attach them to until it has finished.
+  workflow_run:
+    workflows: ['Release']
+    types: [completed]
   workflow_dispatch:
     inputs:
       tag:
@@ -12,6 +16,11 @@ on:
 permissions:
   contents: write
 
+# A `workflow_run` job checks out the default branch by default; every job here has
+# to work on the tag the upstream run was for.
+env:
+  TAG: ${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
+
 jobs:
   # Build one .deb per distro, each inside that distro's own container so the binary
   # links against *its* FFmpeg / Leptonica (sonames differ across releases) and
@@ -19,6 +28,7 @@ jobs:
   # built on the wrong distro fails at load time with e.g. `liblept.so.5` /
   # `libavutil.so.58` missing (issue #1).
   build:
+    if: ${{ github.event_name == 'workflow_dispatch' || (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'push' && startsWith(github.event.workflow_run.head_branch, 'v')) }}
     runs-on: ubuntu-latest
     container: ${{ matrix.image }}
     strategy:
@@ -49,6 +59,8 @@ jobs:
             libavdevice-dev libswscale-dev libswresample-dev libva-dev \
             libpipewire-0.3-dev libtesseract-dev libleptonica-dev libdbus-1-dev
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ env.TAG }}
       - name: Install Rust (rustup; the version comes from rust-toolchain.toml)
         run: |
           set -eux
@@ -92,10 +104,4 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           set -eux
-          tag="${{ github.event.inputs.tag || github.ref_name }}"
-          # the cargo-dist release job creates the release; wait for it.
-          for _ in $(seq 1 30); do
-            gh release view "$tag" >/dev/null 2>&1 && break
-            echo "waiting for release $tag…"; sleep 20
-          done
-          gh release upload "$tag" dist/*.deb --clobber
+          gh release upload "$TAG" dist/*.deb --clobber
