@@ -1,9 +1,7 @@
 name: Debian package
 
 on:
-  # Chained to the cargo-dist `Release` workflow rather than to the tag push: the
-  # .debs are attached to the GitHub release it creates, so there is nothing to
-  # attach them to until it has finished.
+  # Chained to `Release`: the .debs attach to the GitHub release it creates.
   workflow_run:
     workflows: ['Release']
     types: [completed]
@@ -16,8 +14,7 @@ on:
 permissions:
   contents: write
 
-# A `workflow_run` job checks out the default branch by default; every job here has
-# to work on the tag the upstream run was for.
+# `workflow_run` runs on the default branch; the jobs need the upstream run's tag.
 env:
   TAG: ${{ github.event.inputs.tag || github.event.workflow_run.head_branch }}
 
@@ -88,7 +85,7 @@ jobs:
   # host (not a container) so the `gh` CLI is available.
   upload:
     needs: build
-    if: ${{ always() && needs.build.result != 'cancelled' }}
+    if: ${{ always() && needs.build.result != 'cancelled' && needs.build.result != 'skipped' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/download-artifact@v8

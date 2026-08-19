@@ -11,8 +11,6 @@ name: aur
 # AUR_SSH_KEY set, it still builds and validates each package but skips the push.
 
 on:
-  # Chained to the cargo-dist `Release` workflow rather than to the tag push: the
-  # -bin package is built from the archive that workflow uploads.
   workflow_run:
     workflows: ['Release']
     types: [completed]
