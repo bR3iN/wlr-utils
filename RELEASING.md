@@ -20,6 +20,9 @@ Repository secrets needed on GitHub:
 
 - `CARGO_REGISTRY_TOKEN` — a crates.io API token; the `publish` workflow uses it to
   publish on tag. Set it with `gh secret set CARGO_REGISTRY_TOKEN`.
+- `AUR_SSH_KEY` — the private half of a deploy key registered on the AUR account; the
+  `aur` workflow pushes both packages with it. Without it that workflow still builds and
+  validates each package, but skips the push.
 
 ## Before you tag: review the docs that drift
 
@@ -51,15 +54,19 @@ grep 'for pkg in' .github/workflows/publish.yml   # every crate in the publish o
 
 ## Cutting a release `vX.Y.Z`
 
-1. **Bump the version.** It lives in `[workspace.package]` **and** in each inter-crate
+1. **Bump the toolchain** if a newer stable is out: `rustup update`, then set the same
+   version in `rust-toolchain.toml`. That file is the single source of truth — CI, the
+   `.deb` builds and a local checkout all resolve to it, so a green local `clippy` means
+   a green CI `clippy`.
+2. **Bump the version.** It lives in `[workspace.package]` **and** in each inter-crate
    dependency pin (the `version = "X.Y.Z"` next to `path = "../wlr-…"`). `wlr-capture`
    and `wlr-i18n` inherit via `version.workspace = true`; the tool crates pin the
    engine/i18n version explicitly, so those pins must move too. `cargo set-version X.Y.Z`
    (from `cargo-edit`) handles both; verify the pins and refresh `Cargo.lock`.
-2. **Update [`CHANGELOG.md`](CHANGELOG.md)** — a `## X.Y.Z — YYYY-MM-DD` section
+3. **Update [`CHANGELOG.md`](CHANGELOG.md)** — a `## X.Y.Z — YYYY-MM-DD` section
    (Added / Changed / Fixed), referencing the issues/PRs it closes. Commit
    (`chore(release): X.Y.Z`) as the last commit of the release PR.
-3. **Tag and push:**
+4. **Tag and push:**
    ```sh
    git tag vX.Y.Z
    git push --tags
@@ -72,12 +79,13 @@ grep 'for pkg in' .github/workflows/publish.yml   # every crate in the publish o
      the GitHub Release.
    - The `deb` workflow builds the `.deb` per distro and attaches it to that release
      (only crates with `[package.metadata.deb]` ship there).
-4. **AUR** (once an AUR account exists): in `packaging/aur/`, bump `pkgver`, run
-   `updpkgsums` to fill the `sha256sums`, regenerate `.SRCINFO`
-   (`makepkg --printsrcinfo > .SRCINFO`), and push to the `wlr-utils` and
-   `wlr-utils-bin` AUR repositories (both build the whole suite of binaries). The
-   `-bin` package's `package()` paths may need adjusting to match the actual
-   cargo-dist archive layout.
+   - The `aur` workflow publishes both AUR packages from an Arch container: it rewrites
+     `pkgver` from the tag, runs `updpkgsums`, regenerates `.SRCINFO` and pushes. The
+     `pkgver` committed in `packaging/aur/` is only kept in sync for readability. The
+     `-bin` package waits for the cargo-dist archive, so it runs after `release`.
+5. **Replay a failed tag workflow** without re-tagging: `deb` and `aur` take a
+   `workflow_dispatch` with the tag as an input; `publish` takes one on the version
+   currently in `Cargo.toml`.
 
 ## Checks before tagging
 

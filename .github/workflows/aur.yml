@@ -18,7 +18,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag to publish (e.g. v1.5.0)
+        description: Release tag to publish (e.g. v1.7.0)
         required: true
 
 jobs:
@@ -58,7 +58,7 @@ jobs:
           done
           echo "release archive still missing after waiting" >&2; exit 1
 
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Prepare the PKGBUILD
         working-directory: packaging/aur

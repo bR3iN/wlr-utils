@@ -293,7 +293,7 @@ impl Gpu {
 
         // Run the UI. GPU dma-buf frames are imported here via the host importer,
         // since that needs the painter + GL context.
-        let (prims, textures_delta) = {
+        let (prims, mut textures_delta) = {
             let gl = self.painter.gl().clone();
             let mut importer = HostImporter {
                 egl: self.dmabuf_egl,
@@ -316,7 +316,7 @@ impl Gpu {
             gl.clear(glow::COLOR_BUFFER_BIT);
         }
         self.painter
-            .paint_and_update_textures([pw, ph], ppp, &prims, &textures_delta);
+            .paint_and_update_textures([pw, ph], ppp, &prims, &mut textures_delta);
         self.egl.swap_buffers(self.display, self.surface).ok();
     }
 }

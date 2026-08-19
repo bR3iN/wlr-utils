@@ -16,8 +16,8 @@ jobs:
     env:
       CARGO_REGISTRY_TOKEN: ${{ secrets.CARGO_REGISTRY_TOKEN }}
     steps:
-      - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/checkout@v7
+      - run: rustup toolchain install
       - uses: Swatinem/rust-cache@v2
       - name: Install system dependencies
         if: env.CARGO_REGISTRY_TOKEN != ''

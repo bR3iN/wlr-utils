@@ -109,6 +109,18 @@ Ubuntu 22.04's PipeWire / FFmpeg are too old to build the recorder, so that `.de
 > `error while loading shared libraries: libavutil.so.NN` / `liblept.so.N`. Build from
 > source instead: it links against whatever you have.
 
+### NixOS / Nix
+
+Packaged in [nixpkgs](https://github.com/NixOS/nixpkgs/tree/master/pkgs/by-name/wl/wlr-utils),
+on the unstable channel.
+
+```sh
+nix-shell -p wlr-utils                 # try it
+nix profile install nixpkgs#wlr-utils  # …or install it
+```
+
+On NixOS, add `wlr-utils` to `environment.systemPackages`.
+
 ### Prebuilt binaries
 
 One archive with every binary, for any distro — no Rust toolchain needed:

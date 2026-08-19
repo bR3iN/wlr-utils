@@ -4,6 +4,21 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## 1.7.0 — 2026-08-19
+
+### Fixed
+
+- **Build against FFmpeg 9.0** ([#8](https://github.com/sjourdois/wlr-utils/issues/8)) —
+  `ffmpeg-next` 9.0 detects the system libav* at build time and adapts to it.
+
+### Added
+
+- Packaged in **nixpkgs** (unstable channel) — `nix-shell -p wlr-utils`.
+
+### Changed
+
+- Dependency refresh: egui/egui_glow 0.36, resvg 0.48, fontdb 0.24, edgefirst-egl 0.28.
+
 ## 1.6.0 — 2026-07-28
 
 ### Fixed

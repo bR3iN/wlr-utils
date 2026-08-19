@@ -29,9 +29,9 @@ jobs:
           - { image: 'debian:trixie-slim',   codename: trixie,      experimental: false }
           - { image: 'debian:forky-slim',    codename: forky,       experimental: true  }
           - { image: 'debian:sid-slim',      codename: sid,         experimental: true  }
-          # Ubuntu 22.04 (jammy): its PipeWire and FFmpeg 4.x are too old to build the
-          # recording stack (ffmpeg-next 8.1 needs FFmpeg 8.x). Build screenshots-only
-          # (no wlr-shot record, no FFmpeg/PipeWire link); the description says so.
+          # Ubuntu 22.04 (jammy): its PipeWire and FFmpeg 4.x are too old for the
+          # recording stack. Build screenshots-only (no wlr-shot record, no
+          # FFmpeg/PipeWire link); the description says so.
           - { image: 'ubuntu:22.04',         codename: jammy,       experimental: false, debargs: '--no-default-features --variant no-recording' }
           - { image: 'ubuntu:24.04',         codename: noble,       experimental: false }
           - { image: 'ubuntu:26.04',         codename: ubuntu2604,  experimental: true  }
@@ -48,11 +48,11 @@ jobs:
             libavcodec-dev libavformat-dev libavutil-dev libavfilter-dev \
             libavdevice-dev libswscale-dev libswresample-dev libva-dev \
             libpipewire-0.3-dev libtesseract-dev libleptonica-dev libdbus-1-dev
-      - uses: actions/checkout@v4
-      - name: Install Rust (rustup, stable)
+      - uses: actions/checkout@v7
+      - name: Install Rust (rustup; the version comes from rust-toolchain.toml)
         run: |
           set -eux
-          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain stable --profile minimal
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --profile minimal
           echo "$HOME/.cargo/bin" >> "$GITHUB_PATH"
       - name: Install cargo-deb
         run: cargo install cargo-deb --locked
@@ -66,7 +66,7 @@ jobs:
             base="$(basename "$f" .deb)"
             cp "$f" "dist/${base}.${{ matrix.codename }}.deb"
           done
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: deb-${{ matrix.codename }}
           path: dist/*.deb
@@ -79,7 +79,7 @@ jobs:
     if: ${{ always() && needs.build.result != 'cancelled' }}
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: deb-*
           path: dist

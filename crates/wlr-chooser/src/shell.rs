@@ -214,7 +214,6 @@ impl State {
                 egui::vec2(self.width as f32, self.height as f32),
             )),
             time: Some(self.start.elapsed().as_secs_f64()),
-            modifiers: self.modifiers,
             events: std::mem::take(&mut self.events),
             focused: true,
             ..Default::default()
@@ -443,13 +442,17 @@ impl KeyboardHandler for State {
         _: RawModifiers,
         _: u32,
     ) {
-        self.modifiers = egui::Modifiers {
+        let mods = egui::Modifiers {
             alt: modifiers.alt,
             ctrl: modifiers.ctrl,
             shift: modifiers.shift,
             mac_cmd: false,
             command: modifiers.ctrl,
         };
+        if mods != self.modifiers {
+            self.modifiers = mods;
+            self.events.push(egui::Event::ModifiersChanged(mods));
+        }
         // Authoritative modifier state for hold-to-switch.
         self.alt_down = modifiers.alt;
         self.logo_down = modifiers.logo;
