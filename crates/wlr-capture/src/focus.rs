@@ -7,6 +7,7 @@
 //! (`niri msg`).
 
 use crate::wl::Region;
+use std::collections::HashSet;
 
 /// A window's identity + content geometry, for binding a region mirror to the window
 /// under it (`app_id` + `title` match a `wl::Toplevel`; `rect` is its content area).
@@ -97,6 +98,52 @@ impl FocusBackend for Sway {
 
     fn window_at(&self, x: i32, y: i32) -> Option<WindowRef> {
         sway_window_at(&Self::query("get_tree")?, x, y)
+    }
+}
+
+/// The windows in sway's scratchpad, as `ext-foreign-toplevel-list-v1` identifiers.
+///
+/// Sway's `get_tree` reports `foreign_toplevel_identifier` per window, which is the
+/// very string [`wl::Toplevel::identifier`](crate::wl::Toplevel::identifier) carries —
+/// so callers filter a toplevel list by set membership, with none of the app-id/title
+/// guesswork the rest of this module has to do.
+///
+/// Scratchpad membership, not visibility: a window *shown* from the scratchpad keeps a
+/// non-`none` `scratchpad_state` until it is moved back to a workspace, so it is
+/// included here too.
+///
+/// Sway-only (needs `SWAYSOCK`); `None` if the query fails or the reply won't parse.
+pub fn sway_scratchpad_ids() -> Option<HashSet<String>> {
+    Some(sway_scratchpad_identifiers(&Sway::query("get_tree")?))
+}
+
+/// Collect the `foreign_toplevel_identifier` of every node in a sway `get_tree` whose
+/// `scratchpad_state` is not `"none"`. Free function so it's unit-testable without a
+/// live compositor.
+fn sway_scratchpad_identifiers(root: &serde_json::Value) -> HashSet<String> {
+    let mut out = HashSet::new();
+    collect_scratchpad(root, &mut out);
+    out
+}
+
+fn collect_scratchpad(node: &serde_json::Value, out: &mut HashSet<String>) {
+    if node
+        .get("scratchpad_state")
+        .and_then(|s| s.as_str())
+        .is_some_and(|s| s != "none")
+        && let Some(id) = node
+            .get("foreign_toplevel_identifier")
+            .and_then(|i| i.as_str())
+        && !id.is_empty()
+    {
+        out.insert(id.to_string());
+    }
+    for key in ["nodes", "floating_nodes"] {
+        if let Some(children) = node.get(key).and_then(|c| c.as_array()) {
+            for child in children {
+                collect_scratchpad(child, out);
+            }
+        }
     }
 }
 
@@ -330,6 +377,63 @@ mod tests {
         ]
       }]
     }"#;
+
+    // A trimmed sway `get_tree` covering the three cases the scratchpad filter has to
+    // separate: an ordinary tiled window, a *hidden* scratchpad window parked on the
+    // `__i3_scratch` workspace, and a scratchpad window currently *shown* on a real
+    // workspace (still `scratchpad_state != "none"`, so still in the scratchpad).
+    const SWAY_SCRATCHPAD_TREE: &str = r#"{
+      "type":"root",
+      "nodes":[
+        {
+          "type":"output","name":"__i3",
+          "nodes":[{
+            "type":"workspace","name":"__i3_scratch","visible":false,
+            "floating_nodes":[{
+              "type":"floating_con","app_id":"foot","name":"term",
+              "scratchpad_state":"fresh","visible":false,
+              "foreign_toplevel_identifier":"ext-toplevel-0x1a"
+            }]
+          }]
+        },
+        {
+          "type":"output","name":"DP-5",
+          "nodes":[{
+            "type":"workspace","name":"1","visible":true,
+            "nodes":[{
+              "type":"con","app_id":"firefox","name":"Page",
+              "scratchpad_state":"none","visible":true,
+              "foreign_toplevel_identifier":"ext-toplevel-0x2b"
+            }],
+            "floating_nodes":[{
+              "type":"floating_con","app_id":"pavucontrol","name":"Volume",
+              "scratchpad_state":"changed","visible":true,
+              "foreign_toplevel_identifier":"ext-toplevel-0x3c"
+            }]
+          }]
+        }
+      ]
+    }"#;
+
+    #[test]
+    fn sway_scratchpad_identifiers_collects_hidden_and_shown_scratchpad_windows() {
+        let v: serde_json::Value = serde_json::from_str(SWAY_SCRATCHPAD_TREE).unwrap();
+        let ids = sway_scratchpad_identifiers(&v);
+        // The hidden one on __i3_scratch, and the one currently shown from the
+        // scratchpad — both are "in the scratchpad".
+        assert!(ids.contains("ext-toplevel-0x1a"));
+        assert!(ids.contains("ext-toplevel-0x3c"));
+        // The ordinary tiled window is not.
+        assert!(!ids.contains("ext-toplevel-0x2b"));
+        assert_eq!(ids.len(), 2);
+    }
+
+    #[test]
+    fn sway_scratchpad_identifiers_on_empty_scratchpad_is_empty() {
+        // The tree used by the focus tests carries no scratchpad_state at all.
+        let v: serde_json::Value = serde_json::from_str(SWAY_TREE).unwrap();
+        assert!(sway_scratchpad_identifiers(&v).is_empty());
+    }
 
     #[test]
     fn sway_window_at_finds_visible_window_and_content_rect() {

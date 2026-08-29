@@ -47,6 +47,22 @@ pub fn acquire_switch_lock() -> Option<std::fs::File> {
     Some(f)
 }
 
+/// Fail fast when `--scratchpad` is used outside sway. The filter is driven by sway's
+/// `get_tree` IPC — with no `SWAYSOCK` every window is filtered out, so the overlay
+/// would come up empty with nothing to explain why.
+pub fn require_sway_ipc() {
+    if std::env::var_os("SWAYSOCK").is_none() {
+        eprintln!(
+            "{}",
+            crate::tr!(
+                "error",
+                error = "--scratchpad needs sway's IPC, but SWAYSOCK is unset"
+            )
+        );
+        std::process::exit(2);
+    }
+}
+
 /// Spawn the capture thread, build the overlay for `opts`, run it to completion,
 /// and return the picked source (if any). `t0` is the process start, for
 /// cold-start timing (see [`shell::tlog`]).
@@ -58,7 +74,8 @@ pub fn run_overlay(opts: ui::Options, t0: Instant) -> anyhow::Result<Option<ui::
     // reallocates in shm.
     let gpu_failed = Arc::new(AtomicBool::new(false));
     let flag = gpu_failed.clone();
-    std::thread::spawn(move || ui::capture_thread(tx, flag));
+    let scratchpad = opts.scratchpad;
+    std::thread::spawn(move || ui::capture_thread(tx, flag, scratchpad));
     shell::tlog(t0, "capture-thread spawned");
 
     let out: ui::Outcome = Arc::new(Mutex::new(None));

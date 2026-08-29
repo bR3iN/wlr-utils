@@ -172,10 +172,14 @@ enum Capturable {
 /// Toplevels with an empty app-id are captured but marked `is_system`, so the UI
 /// can hide them by default and reveal them on demand. The loop exits when the UI
 /// drops the channel.
+///
+/// With `scratchpad`, only the windows in sway's scratchpad are offered. The filter
+/// is applied *here* rather than in [`App::visible`] so we never open a capture
+/// session (and dma-buf) for a window that will never be shown.
 // SessionId (a wayland ObjectId) is used as a map key: its interior-mutable
 // "alive" flag is not part of Hash/Eq, so it is a sound key.
 #[allow(clippy::mutable_key_type)]
-pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>) {
+pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>, scratchpad: bool) {
     let mut client = match wl::Client::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -189,6 +193,11 @@ pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>) {
     let mut by_id: HashMap<wl::SessionId, String> = HashMap::new(); // reverse, to label frames
     let mut iconed: HashSet<String> = HashSet::new();
     let mut last_keys: Vec<String> = Vec::new();
+    // `--scratchpad`: the scratchpad member set, and the unfiltered toplevel list it
+    // was queried for. Each query forks `swaymsg`, far too costly to repeat every
+    // round, so we re-ask only when a window actually appears or disappears.
+    let mut scratch: HashSet<String> = HashSet::new();
+    let mut scratch_for: Vec<String> = Vec::new();
     let budget = round_budget();
 
     'outer: loop {
@@ -202,6 +211,18 @@ pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>) {
         let mut outputs = client.outputs().to_vec();
         outputs.sort_by(|a, b| a.name.cmp(&b.name));
         let mut windows = client.toplevels().to_vec();
+        if scratchpad {
+            let ids: Vec<String> = windows.iter().map(|w| w.identifier.clone()).collect();
+            if ids != scratch_for {
+                scratch_for = ids;
+                // Keep the last known set if the query fails (sway gone, swaymsg
+                // missing): better a stale filter than silently emptying the picker.
+                if let Some(s) = wlr_capture::focus::sway_scratchpad_ids() {
+                    scratch = s;
+                }
+            }
+            windows.retain(|w| scratch.contains(&w.identifier));
+        }
         windows.sort_by(|a, b| {
             a.app_id
                 .to_lowercase()
@@ -521,6 +542,10 @@ pub struct Options {
     pub hold: bool,
     /// Which Alt-Tab tiles show a live preview (vs. just the icon).
     pub live: Live,
+    /// Offer only the windows in sway's scratchpad. Sway-only (see
+    /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids));
+    /// the CLIs reject it when `SWAYSOCK` is unset.
+    pub scratchpad: bool,
 }
 
 pub struct App {

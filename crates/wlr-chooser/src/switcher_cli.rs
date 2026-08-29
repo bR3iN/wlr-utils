@@ -78,6 +78,10 @@ struct Cli {
     /// Include windows with no app-id (system surfaces)
     #[arg(long)]
     include_system: bool,
+    /// Switch only between the windows in sway's scratchpad (sway-only; needs
+    /// SWAYSOCK). Includes scratchpad windows that are currently shown.
+    #[arg(long)]
+    scratchpad: bool,
     /// Report which capture protocols the current compositor supports, then exit.
     #[arg(long)]
     doctor: bool,
@@ -97,6 +101,10 @@ pub fn main() {
             std::process::exit(1);
         }
         return;
+    }
+
+    if cli.scratchpad {
+        crate::require_sway_ipc();
     }
 
     // Single-instance guard: re-pressing the keybind while we're up is a no-op
@@ -127,6 +135,7 @@ pub fn main() {
         view,
         hold,
         live: cli.live.into(),
+        scratchpad: cli.scratchpad,
     };
 
     // Pre-flight: wlr-switcher switches *windows*, which need the foreign-toplevel
