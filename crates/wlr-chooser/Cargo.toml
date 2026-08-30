@@ -56,7 +56,7 @@ section = "utils"
 priority = "optional"
 license-file = ["../../LICENSE-MIT", "0"]
 # libEGL is dlopen'd at runtime (not linked), so add it on top of the auto-detected deps.
-depends = "$auto, libegl1"
+depends = "$auto, libegl1, libfontconfig1"
 recommends = "fonts-noto-cjk"
 extended-description = """\
 A graphical window & screen picker for wlroots screencast portals \

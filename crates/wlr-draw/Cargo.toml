@@ -63,7 +63,7 @@ maintainer = "Stéphane Jourdois <stephane@jourdois.fr>"
 section = "utils"
 priority = "optional"
 license-file = ["../../LICENSE-MIT", "0"]
-depends = "$auto, libegl1"
+depends = "$auto, libegl1, libfontconfig1"
 extended-description = """\
 A live screen annotation tool for wlroots compositors, in the spirit of gromit-mpx: a \
 transparent always-on-top overlay you draw on with freehand strokes, lines, rectangles, \

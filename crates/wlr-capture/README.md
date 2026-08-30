@@ -66,7 +66,7 @@ features. On by default: `gpu`, `toolkit`.
   shm build (no `libgbm`). The `gl` dma-buf import + readback is built either way.
 - **`toolkit`** — the egui/EGL overlay UI (`render` + `theme`/`icons`); drop it
   (`--no-default-features`) for a headless build that only captures and reads back —
-  no `egui`/`resvg`/`fontdb` (a ~6× smaller dependency tree).
+  no `egui`/`resvg`/`fontconfig` (a ~6× smaller dependency tree).
 - Off by default: **`compose`** (source→image), **`focus`** (compositor IPC),
   **`overlay`**, **`mirror`**, **`video`** (FFmpeg), **`audio`** (PipeWire;
   **`audio-fallback`** adds Pulse/ALSA).

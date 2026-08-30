@@ -63,7 +63,7 @@ maintainer = "Stéphane Jourdois <stephane@jourdois.fr>"
 section = "utils"
 priority = "optional"
 license-file = ["../../LICENSE-MIT", "0"]
-depends = "$auto, libegl1"
+depends = "$auto, libegl1, libfontconfig1"
 extended-description = """\
 A screen capture tool for wlroots compositors built on the shared wlr-capture \
 engine: screenshots of an output, a region or a window, plus H.264 recording and \

@@ -176,15 +176,20 @@ impl Theme {
     /// font is installed).
     fn install_fonts(&self, ctx: &egui::Context) {
         let mut fonts = egui::FontDefinitions::default();
-        let mut db = fontdb::Database::new();
-        db.load_system_fonts();
+        // Queries go to fontconfig, which answers from its own cache in single-digit
+        // milliseconds. Parsing every installed face ourselves (what fontdb's
+        // `load_system_fonts` did) cost ~300ms of cold start on a 3000-face system —
+        // the dominant term in how long the overlay took to appear. `None` when
+        // libfontconfig.so.1 isn't loadable: egui's embedded fonts then carry the UI.
+        let fc = fontconfig::Fontconfig::new();
+        let family = |name: &str| fc.as_ref().and_then(|fc| load_family(fc, name));
 
         // Primary UI font: explicit file, or a family resolved via fontconfig.
         let primary = self
             .font_path
             .as_deref()
             .and_then(read_font_file)
-            .or_else(|| self.font.as_deref().and_then(|f| load_family(&db, f)));
+            .or_else(|| self.font.as_deref().and_then(&family));
         if let Some(data) = primary {
             fonts.font_data.insert("ui".into(), data.into());
             for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
@@ -200,8 +205,8 @@ impl Theme {
         let cjk = self
             .cjk_font
             .as_deref()
-            .and_then(|f| load_family(&db, f))
-            .or_else(|| CJK_FAMILIES.iter().find_map(|f| load_family(&db, f)));
+            .and_then(&family)
+            .or_else(|| CJK_FAMILIES.iter().find_map(|f| family(f)));
         if let Some(data) = cjk {
             fonts.font_data.insert("cjk".into(), data.into());
             for fam in [egui::FontFamily::Proportional, egui::FontFamily::Monospace] {
@@ -228,18 +233,24 @@ fn read_font_file(path: &str) -> Option<egui::FontData> {
     Some(egui::FontData::from_owned(bytes))
 }
 
-/// Resolve a font family name to its data (handles `.ttc` face indices).
-fn load_family(db: &fontdb::Database, family: &str) -> Option<egui::FontData> {
-    let query = fontdb::Query {
-        families: &[fontdb::Family::Name(family)],
-        ..Default::default()
-    };
-    let id = db.query(&query)?;
-    db.with_face_data(id, |bytes, index| {
-        let mut data = egui::FontData::from_owned(bytes.to_vec());
-        data.index = index;
-        data
-    })
+/// Resolve a font family name to its data (handles `.ttc` face indices), or `None`
+/// if that family isn't installed.
+///
+/// fontconfig always answers a query — an absent family gets substituted with the
+/// system default rather than refused — so the match is only ours if it carries the
+/// name we asked for. Without that check every [`CJK_FAMILIES`] probe would "find"
+/// a Latin font and install it as the CJK fallback.
+fn load_family(fc: &fontconfig::Fontconfig, family: &str) -> Option<egui::FontData> {
+    let font = fc.find(family, None).ok()?;
+    if !font.name.to_lowercase().starts_with(&family.to_lowercase()) {
+        return None;
+    }
+    let bytes = std::fs::read(&font.path).ok()?;
+    let mut data = egui::FontData::from_owned(bytes);
+    // fontconfig packs a named-instance ordinal (variable fonts) into the upper 16
+    // bits of the index; egui wants the plain face number in the lower half.
+    data.index = (font.index.unwrap_or(0) as u32) & 0xFFFF;
+    Some(data)
 }
 
 fn config_path() -> Option<std::path::PathBuf> {

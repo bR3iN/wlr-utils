@@ -57,7 +57,7 @@ image = { workspace = true, optional = true }
 resvg = { workspace = true, optional = true }
 toml = { workspace = true, optional = true }
 serde = { workspace = true, optional = true }
-fontdb = { workspace = true, optional = true }
+fontconfig = { workspace = true, optional = true }
 
 [dev-dependencies]
 # Private (0600), randomly-named, auto-removed temp output for the encoder round-trip test.
@@ -104,7 +104,7 @@ audio = ["video", "dep:pipewire"]
 audio-fallback = ["audio", "ffmpeg-next/device"]
 # The egui/EGL overlay toolkit (`render` + `theme`/`icons`). On by default; disable it
 # (`--no-default-features`) for a headless build that only captures and reads back,
-# dropping egui, resvg and fontdb. Carries no UI strings — on-screen text is passed in
+# dropping egui, resvg and fontconfig. Carries no UI strings — on-screen text is passed in
 # by the caller (each tool crate localises via `wlr-i18n`).
 toolkit = [
     "dep:egui",
@@ -114,5 +114,5 @@ toolkit = [
     "dep:resvg",
     "dep:toml",
     "dep:serde",
-    "dep:fontdb",
+    "dep:fontconfig",
 ]

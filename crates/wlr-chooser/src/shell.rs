@@ -150,6 +150,8 @@ pub fn run(app: App, t0: Instant) -> anyhow::Result<()> {
 
     let egui_ctx = egui::Context::default();
     app.apply_theme(&egui_ctx);
+    // Includes the fontconfig scan + parsing whatever font files it resolves.
+    tlog(t0, "theme + fonts installed");
 
     let hold = app.hold();
     let mut state = State {
@@ -318,12 +320,17 @@ impl LayerShellHandler for State {
         _: u32,
     ) {
         let (w, h) = configure.new_size;
+        let first = self.width == 0;
         if w > 0 && h > 0 {
             self.width = w;
             self.height = h;
         }
         if self.width == 0 {
             return;
+        }
+        if first {
+            // How long the compositor took to hand us a size — pure waiting on our side.
+            tlog(self.t0, "layer surface configured");
         }
         if let Some(gpu) = self.gpu.as_ref() {
             gpu.resize(
