@@ -1444,33 +1444,39 @@ impl App {
         chosen
     }
 
-    /// Draw one Alt-Tab tile's content: a live preview (when `live` and a frame is
-    /// available) with an app-icon badge so the app stays identifiable, otherwise
-    /// the big app icon.
+    /// Draw one Alt-Tab tile's content: a live preview with an app-icon badge so the
+    /// app stays identifiable, or — where no preview is coming — the big app icon.
+    ///
+    /// A tile that expects a preview paints the badge layout from the very first
+    /// frame, empty letterbox and all, rather than a big icon that would shrink to a
+    /// badge the moment the first capture lands a few tens of ms later.
     fn paint_switch_cell(&self, ui: &egui::Ui, s: &Source, rect: egui::Rect, live: bool) {
+        if !live {
+            // `--live none`, or an unhighlighted tile under `--live current`: the big
+            // icon is all this tile will ever show.
+            self.paint_app_icon(ui, s, rect);
+            return;
+        }
         let full = egui::Rect::from_min_max(egui::pos2(0.0, 0.0), egui::pos2(1.0, 1.0));
-        if live && let Some((tex, ts)) = self.thumb_tex(&s.key) {
-            let p = ui.painter();
-            p.rect_filled(rect, 6.0, self.theme.thumb); // backdrop for letterboxing
+        let p = ui.painter();
+        p.rect_filled(rect, 6.0, self.theme.thumb); // backdrop for letterboxing
+        if let Some((tex, ts)) = self.thumb_tex(&s.key) {
             let scale = (rect.width() / ts.x).min(rect.height() / ts.y);
             let d = egui::Rect::from_center_size(rect.center(), ts * scale);
             p.image(tex, d, full, egui::Color32::WHITE);
-            // App-icon badge, bottom-left, so the window stays identifiable.
-            if let Some(ic) = self.icons.get(&s.key) {
-                let bsz = (rect.width() * 0.34).clamp(20.0, 48.0);
-                let brect = egui::Rect::from_min_size(
-                    egui::pos2(rect.left() + 4.0, rect.bottom() - bsz - 4.0),
-                    egui::vec2(bsz, bsz),
-                );
-                let isz = ic.size_vec2();
-                let sc = (brect.width() / isz.x).min(brect.height() / isz.y);
-                let bd = egui::Rect::from_center_size(brect.center(), isz * sc);
-                p.image(ic.id(), bd, full, egui::Color32::WHITE);
-            }
-            return;
         }
-        // No live preview (mode off, or no frame yet): big centred app icon.
-        self.paint_app_icon(ui, s, rect);
+        // App-icon badge, bottom-left, so the window stays identifiable.
+        if let Some(ic) = self.icons.get(&s.key) {
+            let bsz = (rect.width() * 0.34).clamp(20.0, 48.0);
+            let brect = egui::Rect::from_min_size(
+                egui::pos2(rect.left() + 4.0, rect.bottom() - bsz - 4.0),
+                egui::vec2(bsz, bsz),
+            );
+            let isz = ic.size_vec2();
+            let sc = (brect.width() / isz.x).min(brect.height() / isz.y);
+            let bd = egui::Rect::from_center_size(brect.center(), isz * sc);
+            p.image(ic.id(), bd, full, egui::Color32::WHITE);
+        }
     }
 
     /// Draw a source's app icon filling `rect` (contain). Falls back to its live
