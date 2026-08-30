@@ -78,7 +78,7 @@ don't clash with the compositor's `$mod+…` bindings, so you only need to bind 
 | `e` | eraser | `h` | toggle the help legend |
 | `s` | move tool (or right-drag) | `Ctrl` | constrain shape / move axis (hold) |
 | `Space` | freeze-frame on/off | `Shift` | spotlight (hold); wheel/`ijkl` size & dim |
-| `Esc` | unfreeze / close popup / leave | | |
+| `Esc` (or `Ctrl+[`) | unfreeze / close popup / leave | | |
 | `↑↓←→` | nudge selection (`Shift`: 1px, `Ctrl`: big) | | |
 
 Shortcuts are by produced letter, so they follow your keyboard layout. While typing a
@@ -105,11 +105,11 @@ A commented example listing every binding with its default is at
 [`docs/wlr-draw-keys.toml`](../../docs/wlr-draw-keys.toml) — copy it to
 `~/.config/wlr-draw/keys.toml` and edit.
 
-Fixed (not rebindable): `Esc` (always backs out), the arrow-key nudge, and the spotlight
-size/dim cluster (`i`/`j`/`k`/`l` + wheel, live only while spotlighting). The nudge step
-size still reads the physical `Shift` (1px) / `Ctrl` (big) keys. A bad name or a key bound
-to two things is reported on stderr and the default is kept. The on-screen `h` legend and
-the tray's Shortcuts menu reflect your bindings.
+Fixed (not rebindable): `Esc` and its `Ctrl+[` alias (always back out), the arrow-key
+nudge, and the spotlight size/dim cluster (`i`/`j`/`k`/`l` + wheel, live only while
+spotlighting). The nudge step size still reads the physical `Shift` (1px) / `Ctrl` (big)
+keys. A bad name or a key bound to two things is reported on stderr and the default is
+kept. The on-screen `h` legend and the tray's Shortcuts menu reflect your bindings.
 
 ## Drawing
 

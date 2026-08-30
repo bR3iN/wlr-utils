@@ -50,6 +50,7 @@ use wayland_client::{
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
 };
+use wlr_capture::keys::is_cancel;
 use wlr_capture::render::Gpu;
 use wlr_capture::theme::Theme;
 use wlr_capture::{capture, wl};
@@ -1003,11 +1004,12 @@ impl State {
     /// also arrives over the socket, so these are a convenience, not the only way.
     fn on_key(&mut self, event: &KeyEvent) {
         if self.text_edit.is_some() {
+            if is_cancel(event.keysym, self.ctrl_held) {
+                self.text_edit = None; // discard the in-progress label
+                self.dirty = true;
+                return;
+            }
             match event.keysym {
-                Keysym::Escape => {
-                    self.text_edit = None; // discard the in-progress label
-                    self.dirty = true;
-                }
                 Keysym::Return | Keysym::KP_Enter => self.commit_text(),
                 Keysym::BackSpace => {
                     if let Some((_, buf)) = self.text_edit.as_mut() {
@@ -1060,8 +1062,8 @@ impl State {
             }
             return;
         }
-        // Esc peels back one layer at a time (popup → frozen → draw mode).
-        if event.keysym == Keysym::Escape {
+        // Esc (or Ctrl+[) peels back one layer at a time (popup → frozen → draw mode).
+        if is_cancel(event.keysym, self.ctrl_held) {
             if self.show_palette {
                 self.show_palette = false;
                 self.dirty = true;

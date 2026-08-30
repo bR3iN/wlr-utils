@@ -4,6 +4,7 @@
 //! in. Toplevel capture is occlusion-independent, so showing our own window
 //! first is fine.
 
+use crate::keys::{CycleKeys, Dir};
 use crate::tr;
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -575,6 +576,9 @@ pub struct Options {
     /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids)) and
     /// wlr-switcher-only; the portal picker always leaves this off.
     pub scratchpad: bool,
+    /// Keys that cycle the highlight. `Tab` / `Shift+Tab` unless wlr-switcher was
+    /// pointed elsewhere by the environment (see [`crate::keys`]).
+    pub cycle: CycleKeys,
 }
 
 pub struct App {
@@ -606,9 +610,14 @@ pub struct App {
     hold: bool,
     /// Which Alt-Tab tiles show a live preview (vs. just the icon).
     live: Live,
+    /// Keys that cycle the highlight (`Tab` / `Shift+Tab` by default).
+    cycle: CycleKeys,
     /// Set once the host confirms Alt was held at startup; enables Tab-cycle and
     /// confirm-on-Alt-release. Stays false (classic picker) if Alt is never seen.
     armed: bool,
+    /// Whether arming counts the launching chord as a first cycle (see
+    /// [`App::arm`]). Off under `--scratchpad`.
+    advance_on_arm: bool,
     /// On the first armed frame with sources present, jump the selection to the
     /// next window (index 1) so releasing Alt immediately switches — like a real
     /// Alt-Tab where the launching Tab already advanced once.
@@ -646,7 +655,11 @@ impl App {
             selected: 0,
             hold: opts.hold,
             live: opts.live,
+            cycle: opts.cycle,
             armed: false,
+            // The initial advance is Alt-Tab's own convention; picking out of the
+            // scratchpad starts on the first window instead.
+            advance_on_arm: !opts.scratchpad,
             pending_initial_select: false,
             focus_filter: true,
             closing: false,
@@ -671,16 +684,26 @@ impl App {
         self.hold
     }
 
+    /// The keys bound to the two cycle directions; the host matches raw keysyms
+    /// against them while armed, before egui gets a look.
+    pub fn cycle_keys(&self) -> CycleKeys {
+        self.cycle
+    }
+
     /// The host detected the launch modifier held at startup: enable Tab-cycle and
     /// confirm-on-release, and arm the initial MRU-ish jump.
+    ///
+    /// The jump treats the launching chord as a first cycle — right for `Mod1+Tab`,
+    /// whose `Tab` the compositor swallows before we hold focus, so it can never
+    /// reach us. Skipped under `--scratchpad`, which opens on the first window.
     pub fn arm(&mut self) {
         if !self.armed {
             self.armed = true;
-            self.pending_initial_select = true;
+            self.pending_initial_select = self.advance_on_arm;
         }
     }
 
-    /// Advance (or retreat) the highlighted source — Tab / Shift+Tab.
+    /// Advance (or retreat) the highlighted source — Tab / Shift+Tab by default.
     pub fn cycle(&mut self, forward: bool) {
         let n = self.visible().len();
         if n == 0 {
@@ -838,24 +861,36 @@ impl App {
 
         // Keyboard (read states first; don't call ctx methods inside ctx.input).
         let vis_len = self.visible().len();
-        // In the views with no search field (exposé grid, Alt-Tab strip), Tab /
-        // Shift+Tab also navigate — even when not armed (e.g. `$mod+Tab` exposé).
-        // When armed, the host intercepts Tab before egui, so this never collides.
+        // In the views with no search field (exposé grid, Alt-Tab strip), the cycle
+        // keys (Tab / Shift+Tab by default) also navigate — even when not armed
+        // (e.g. `$mod+Tab` exposé). When armed, the host intercepts them before egui,
+        // so this never collides.
         let switch_nav = matches!(self.view, View::Strip | View::Grid);
-        let (esc, next, prev, enter) = ctx.input(|i| {
-            let tab = switch_nav && i.key_pressed(egui::Key::Tab);
+        let cycle = self.cycle;
+        let (cancel, next, prev, enter) = ctx.input(|i| {
+            let dir = switch_nav
+                .then(|| {
+                    [cycle.next, cycle.prev]
+                        .into_iter()
+                        .find(|&k| i.key_pressed(k))
+                        .and_then(|k| cycle.dir(k, i.modifiers.shift))
+                })
+                .flatten();
             (
-                i.key_pressed(egui::Key::Escape),
+                // Backspace backs out too, in the same views — where no search field
+                // is there to claim it.
+                i.key_pressed(egui::Key::Escape)
+                    || (switch_nav && i.key_pressed(egui::Key::Backspace)),
                 i.key_pressed(egui::Key::ArrowRight)
                     || i.key_pressed(egui::Key::ArrowDown)
-                    || (tab && !i.modifiers.shift),
+                    || dir == Some(Dir::Next),
                 i.key_pressed(egui::Key::ArrowLeft)
                     || i.key_pressed(egui::Key::ArrowUp)
-                    || (tab && i.modifiers.shift),
+                    || dir == Some(Dir::Prev),
                 i.key_pressed(egui::Key::Enter),
             )
         });
-        if esc {
+        if cancel {
             self.closing = true;
         }
         if vis_len > 0 {

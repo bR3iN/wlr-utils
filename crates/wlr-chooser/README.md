@@ -121,8 +121,9 @@ focused output. You can pass options in `chooser_cmd`, e.g.
 -V, --version          Print version
 ```
 
-In the overlay: type to filter, arrows to move, Enter/click to pick, Escape or
-click-outside to cancel, and the tab bar switches All / Windows / Screens.
+In the overlay: type to filter, arrows to move, Enter/click to pick, Escape (or
+`Ctrl+[`) or click-outside to cancel, and the tab bar switches All / Windows /
+Screens.
 
 > **Looking for an Alt-Tab / window switcher?** That is now a separate binary,
 > **`wlr-switcher`** (shipped alongside this one) — see [its section](#window-switcher--wlr-switcher) below.
@@ -158,12 +159,32 @@ bindsym $mod+Tab exec wlr-switcher --layout grid   # full-screen exposé
 - The overlay appears while the modifier (Alt **or** Super) is held.
 - **`Tab`** moves to the next window, **`Shift+Tab`** to the previous one.
 - **Releasing the modifier** confirms the highlighted window and switches to it.
-- Mouse click and `Esc` (cancel) still work.
+- Mouse click and `Esc` (or `Ctrl+[`) still cancel.
 
 Hold-to-switch is **on by default for `strip`** and **off for `grid`/`card`**;
 force it either way with `--hold` / `--no-hold`. With it off, the overlay stays
 open after release — confirm with Enter or a click. Only one switcher opens at a
 time (re-pressing the keybind is a no-op).
+
+### Rebinding the cycle keys
+
+`Tab` / `Shift+Tab` are the default; `--cycle-next` and `--cycle-prev` move
+either direction elsewhere:
+
+```
+bindsym Mod1+grave exec wlr-switcher --cycle-next j --cycle-prev k
+```
+
+Keys are named the way egui names them — the variant names (`Tab`, `ArrowDown`,
+`Num1`), their aliases (`Down`) and bare characters (`j`, `1`, `-`) all work; an
+unknown name is a usage error.
+
+Leave both directions on one key and `Shift` picks between them, which is what
+the default is: `--cycle-next j` alone gives you `j` / `Shift+j`. Bind them to
+two different keys (`--cycle-next j --cycle-prev k`) and each key means what it
+says, `Shift` or not. Arrow keys always navigate as well. In the `card` layout
+the cycle keys apply only while a launch modifier is held; otherwise `Tab`
+belongs to the search field.
 
 > **Tip:** set `WLR_CHOOSER_TIMING=1` to print cold-start timing milestones to
 > stderr if you want to profile how fast the overlay appears.

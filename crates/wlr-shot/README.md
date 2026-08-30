@@ -33,7 +33,7 @@ wlr-shot record [-o NAME | -g GEOM | -w ID | --app-id ID | --pick-window | -s | 
 Source (pick one; defaults to the sole output):
 
 - `-s, --select` — **interactively** drag a region on a frozen overlay (spans all
-  outputs; `Esc` cancels, `Enter` confirms). No external tool needed.
+  outputs; `Esc` — or `Ctrl+[` — cancels, `Enter` confirms). No external tool needed.
 - `-o, --output NAME` — a whole output (e.g. `DP-4`).
 - `--all` — the whole layout: every output combined into one image.
 - `-g, --geometry "X,Y WxH"` — a logical region (the format **slurp** prints),

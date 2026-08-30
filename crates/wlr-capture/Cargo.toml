@@ -18,7 +18,7 @@ path = "src/lib.rs"
 # published docs. Enable them explicitly. `audio`/`audio-fallback` stay off: their
 # `pipewire` dep fails to build on docs.rs (whereas `video`'s ffmpeg-next builds fine).
 [package.metadata.docs.rs]
-features = ["gpu", "toolkit", "compose", "focus", "overlay", "mirror", "video"]
+features = ["gpu", "toolkit", "compose", "focus", "input", "overlay", "mirror", "video"]
 rustdoc-args = ["--cfg", "docsrs"]
 
 [dependencies]
@@ -80,11 +80,16 @@ focus = ["dep:serde_json"]
 # The shared frozen-screen overlay (`overlay`): a layer-shell surface per output
 # rendering a frozen capture for interactive region/point selection. Needs the
 # toolkit (egui rendering), compose (OutputCapture) and a windowing host (sctk).
-overlay = ["toolkit", "compose", "dep:smithay-client-toolkit"]
+overlay = ["toolkit", "compose", "input"]
+# Shared keyboard conventions (`keys`): the cancel chord every tool honours. Split out
+# of `overlay`/`mirror` so a crate with its own windowing host (wlr-chooser, wlr-draw)
+# can share the convention without pulling the overlay in. Only needs sctk's keysyms,
+# which those crates already link.
+input = ["dep:smithay-client-toolkit"]
 # The floating live-mirror host (`mirror`): an xdg-toplevel egui window that streams
 # a source (a window, or a magnified region) live. Shared by `wlr-peek mirror`. Needs
 # the toolkit (egui rendering) and a windowing host (sctk, with its calloop + xdg).
-mirror = ["toolkit", "dep:smithay-client-toolkit"]
+mirror = ["toolkit", "input"]
 # Hardware/software video encoding (`video`): a FrameSink that encodes a capture
 # stream to a file via FFmpeg (NVENC / VAAPI / libx264). Headless — no toolkit. Pulls
 # `ffmpeg-next`, which links the system libav* libraries (needs the `-dev` packages).

@@ -6,6 +6,7 @@
 
 pub mod chooser_cli;
 mod i18n;
+pub mod keys;
 pub mod shell;
 pub mod switcher_cli;
 pub mod ui;

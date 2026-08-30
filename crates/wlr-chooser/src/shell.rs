@@ -6,6 +6,7 @@
 //! windowing layer differs from a normal app; the whole UI (`ui::App`) is reused
 //! unchanged.
 
+use crate::keys::Dir;
 use crate::ui::App;
 use smithay_client_toolkit::{
     compositor::{CompositorHandler, CompositorState, FrameCallbackData},
@@ -36,6 +37,7 @@ use wayland_protocols::wp::keyboard_shortcuts_inhibit::zv1::client::{
     zwp_keyboard_shortcuts_inhibit_manager_v1::ZwpKeyboardShortcutsInhibitManagerV1,
     zwp_keyboard_shortcuts_inhibitor_v1::ZwpKeyboardShortcutsInhibitorV1,
 };
+use wlr_capture::keys::is_cancel;
 use wlr_capture::render::Gpu;
 
 struct State {
@@ -505,16 +507,25 @@ impl State {
             self.logo_down = pressed;
             self.reconcile();
         }
-        // While armed, Tab / Shift+Tab cycle the highlight instead of reaching
-        // egui (its TextEdit would otherwise eat Tab for focus traversal). Some
-        // compositors send `ISO_Left_Tab` for Shift+Tab.
-        let is_tab = event.keysym == Keysym::Tab || event.keysym == Keysym::ISO_Left_Tab;
-        if self.armed && pressed && is_tab {
-            let forward = event.keysym == Keysym::Tab && !self.modifiers.shift;
-            self.app.cycle(forward);
-            return;
+        // `Ctrl+[` is the cancel chord shared by every wlr-utils tool; the UI only
+        // knows Esc, so hand it over as that.
+        let key = if is_cancel(event.keysym, self.modifiers.ctrl) {
+            Some(egui::Key::Escape)
+        } else {
+            map_key(event.keysym)
+        };
+        // While armed, the cycle keys move the highlight instead of reaching egui
+        // (its TextEdit would otherwise eat Tab for focus traversal).
+        if self.armed && pressed {
+            // Some compositors send `ISO_Left_Tab` for Shift+Tab — `map_key` folds it
+            // back into Tab, so the keysym carries the Shift the mask may not.
+            let shift = self.modifiers.shift || event.keysym == Keysym::ISO_Left_Tab;
+            if let Some(dir) = key.and_then(|k| self.app.cycle_keys().dir(k, shift)) {
+                self.app.cycle(dir == Dir::Next);
+                return;
+            }
         }
-        if let Some(key) = map_key(event.keysym) {
+        if let Some(key) = key {
             self.events.push(egui::Event::Key {
                 key,
                 physical_key: None,
@@ -603,6 +614,10 @@ impl ProvidesRegistryState for State {
     registry_handlers![OutputState, SeatState];
 }
 
+/// Keysym → [`egui::Key`], for the keys the UI acts on. The named table covers the
+/// editing/navigation keys; anything else falls back to the character the key
+/// produces, so a cycle key bound to `J` or `Minus` (see [`crate::keys`]) is
+/// recognised too. Text input rides on `Event::Text`, not on this.
 fn map_key(k: Keysym) -> Option<egui::Key> {
     use egui::Key;
     Some(match k {
@@ -618,7 +633,7 @@ fn map_key(k: Keysym) -> Option<egui::Key> {
         Keysym::Home => Key::Home,
         Keysym::End => Key::End,
         Keysym::space => Key::Space,
-        _ => return None,
+        _ => return k.key_char().and_then(|c| Key::from_name(&c.to_string())),
     })
 }
 

@@ -8,6 +8,7 @@
 
 use crate::capture::OutputCapture;
 use crate::error::{CaptureError, Context, Result};
+use crate::keys::is_cancel;
 use crate::render::Gpu;
 use crate::wl::Region;
 use smithay_client_toolkit::{
@@ -485,6 +486,8 @@ struct State {
     zoom: f32,
     /// The overlay must be redrawn on all surfaces.
     dirty: bool,
+    /// Control held, so `Ctrl+[` can be told apart from a bare `[` (same keysym).
+    ctrl: bool,
     /// Resolved result (on confirm) and whether the loop should exit.
     result: Option<Outcome>,
     done: bool,
@@ -614,6 +617,7 @@ fn run(
         cur: None,
         zoom: 3.0,
         dirty: false,
+        ctrl: false,
         result: None,
         done: false,
     };
@@ -853,11 +857,12 @@ impl KeyboardHandler for State {
         _: u32,
         event: KeyEvent,
     ) {
+        if is_cancel(event.keysym, self.ctrl) {
+            self.result = None;
+            self.done = true;
+            return;
+        }
         match event.keysym {
-            Keysym::Escape => {
-                self.result = None;
-                self.done = true;
-            }
             Keysym::Return | Keysym::KP_Enter => match self.mode {
                 Mode::Region => {
                     if let Some(r) = self.selection() {
@@ -904,10 +909,11 @@ impl KeyboardHandler for State {
         _: &QueueHandle<Self>,
         _: &wl_keyboard::WlKeyboard,
         _: u32,
-        _: Modifiers,
+        modifiers: Modifiers,
         _: RawModifiers,
         _: u32,
     ) {
+        self.ctrl = modifiers.ctrl;
     }
 }
 

@@ -38,7 +38,7 @@ $ wlr-peek color --clipboard      # copy to the Wayland clipboard instead
 
 - Move the cursor; the loupe magnifies the pixels around it.
 - **Click** (or **Enter**) to pick the pixel under the crosshair.
-- **Esc** to cancel (exit status 1).
+- **Esc** (or **Ctrl+[**) to cancel (exit status 1).
 
 `--format hex|rgb|plain` chooses the output. `--clipboard` runs a small background
 daemon that serves the colour as text on the wlroots clipboard until replaced.
@@ -70,7 +70,7 @@ with no native OCR dependencies.
 ### `loupe` — full-screen magnifier
 
 Freezes the screen and magnifies around the cursor; the point under the cursor stays
-put as you move, scroll to change the zoom, **Esc** to quit.
+put as you move, scroll to change the zoom, **Esc** (or **Ctrl+[**) to quit.
 
 ```console
 $ wlr-peek loupe
@@ -116,7 +116,7 @@ $ wlr-peek mirror -s --follow window   # loupe that sticks to the window you pic
 
 Drag to move, the bottom-right grip to resize, the toolbar to collapse to a badge or
 close; **Space** freezes, **c** collapses, **+/-** or the wheel set opacity, **r**
-re-picks (window mode), **Esc** closes. Pair with sway rules `floating enable, sticky
+re-picks (window mode), **Esc** (or **Ctrl+[**) closes. Pair with sway rules `floating enable, sticky
 enable` for always-on-top across workspaces.
 
 ### `region` — select a region/point, print its geometry (slurp replacement)

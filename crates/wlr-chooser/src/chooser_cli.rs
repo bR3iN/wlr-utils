@@ -7,6 +7,7 @@
 //! For an interactive window switcher / Alt-Tab / exposé, see the sibling
 //! `wlr-switcher` binary.
 
+use crate::keys::CycleKeys;
 use crate::ui::{self, Live, Mode, Options, View};
 use crate::{i18n, tr};
 use crate::{parse_grid, run_overlay};
@@ -88,6 +89,9 @@ pub fn main() {
         // Scratchpad filtering is a wlr-switcher feature; the portal picker offers
         // monitors too, where "the windows in the scratchpad" means little.
         scratchpad: false,
+        // Rebindable cycling is a wlr-switcher feature too: the picker is a card with
+        // a search field, where Tab belongs to the field rather than to navigation.
+        cycle: CycleKeys::default(),
     };
 
     match run_overlay(opts, t0) {

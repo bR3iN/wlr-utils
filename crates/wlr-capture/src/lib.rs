@@ -24,6 +24,11 @@
 //! - [`focus`]: "the active window" / "the current output" via the compositor's own
 //!   IPC (Sway today). Wayland gives no portable way to query focus.
 //!
+//! Behind the `input` feature (pulls the sctk keyboard types; implied by
+//! `overlay`/`mirror`):
+//! - [`keys`]: keyboard conventions every wlr-utils overlay shares — today the
+//!   cancel chord (`Esc` / `Ctrl+[`).
+//!
 //! This crate carries **no localised UI strings**: it exposes an API and typed
 //! [`CaptureError`]s, and any on-screen text (e.g. the overlay hints, the mirror labels)
 //! is passed in by the caller. Each tool crate owns its own catalog via `wlr-i18n`.
@@ -65,6 +70,10 @@ pub mod capture;
 #[cfg(feature = "focus")]
 #[cfg_attr(docsrs, doc(cfg(feature = "focus")))]
 pub mod focus;
+
+#[cfg(feature = "input")]
+#[cfg_attr(docsrs, doc(cfg(feature = "input")))]
+pub mod keys;
 
 #[cfg(feature = "overlay")]
 #[cfg_attr(docsrs, doc(cfg(feature = "overlay")))]
