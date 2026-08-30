@@ -259,7 +259,7 @@ impl GpuReadback {
         unsafe { (egl.destroy_image)(egl.display, image) };
         let mut rgba = read?;
 
-        for px in rgba.chunks_exact_mut(4) {
+        for px in rgba.as_chunks_mut::<4>().0 {
             px[3] = 255;
         }
         Ok(wl::CapturedImage {
@@ -355,7 +355,9 @@ mod tests {
     /// Attribute lists are name/value pairs; look a name up.
     fn get(attrs: &[i32], name: i32) -> Option<i32> {
         attrs
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .find(|c| c[0] == name)
             .map(|c| c[1])
             .filter(|_| name != EGL_ATTRIB_NONE)

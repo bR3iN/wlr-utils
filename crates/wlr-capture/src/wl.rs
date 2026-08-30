@@ -1638,8 +1638,10 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for State {
             Event::DmabufFormat { format, modifiers } => {
                 // modifiers: array of native-endian u64.
                 let mods = modifiers
-                    .chunks_exact(8)
-                    .map(|c| u64::from_ne_bytes(c.try_into().unwrap()))
+                    .as_chunks::<8>()
+                    .0
+                    .iter()
+                    .map(|c| u64::from_ne_bytes(*c))
                     .collect();
                 d.dmabuf_formats.push((format, mods));
             }

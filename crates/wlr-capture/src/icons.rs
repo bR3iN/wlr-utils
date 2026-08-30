@@ -103,7 +103,7 @@ fn load_svg(path: &Path, size: u32) -> Option<(u32, u32, Vec<u8>)> {
     );
     // tiny-skia is premultiplied; un-premultiply for egui's unmultiplied textures.
     let mut rgba = pixmap.take();
-    for px in rgba.chunks_exact_mut(4) {
+    for px in rgba.as_chunks_mut::<4>().0 {
         let a = px[3];
         if a > 0 {
             let af = a as f32;

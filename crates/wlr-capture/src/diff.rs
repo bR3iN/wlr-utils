@@ -24,8 +24,10 @@ pub fn changed_fraction(a: &CapturedImage, b: &CapturedImage, tolerance: u8) -> 
     }
     let changed = a
         .rgba
-        .chunks_exact(4)
-        .zip(b.rgba.chunks_exact(4))
+        .as_chunks::<4>()
+        .0
+        .iter()
+        .zip(b.rgba.as_chunks::<4>().0)
         .filter(|(pa, pb)| {
             pa[0].abs_diff(pb[0]) > tolerance
                 || pa[1].abs_diff(pb[1]) > tolerance

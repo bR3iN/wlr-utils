@@ -168,7 +168,7 @@ fn pw_loop(
             if let Some(slice) = d.data() {
                 let slice = &slice[..n_bytes.min(slice.len())];
                 let mut q = pcm_cb.lock().unwrap();
-                for s in slice.chunks_exact(4) {
+                for s in slice.as_chunks::<4>().0 {
                     q.push_back(f32::from_le_bytes([s[0], s[1], s[2], s[3]]));
                 }
             }

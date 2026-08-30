@@ -518,7 +518,7 @@ impl Pipeline {
             let mut planes: Vec<Vec<f32>> = (0..AUDIO_CHANNELS)
                 .map(|_| Vec::with_capacity(frame_size))
                 .collect();
-            for fr in buf[..need].chunks_exact(AUDIO_CHANNELS) {
+            for fr in buf[..need].as_chunks::<AUDIO_CHANNELS>().0 {
                 for (c, p) in planes.iter_mut().enumerate() {
                     p.push(fr[c]);
                 }
