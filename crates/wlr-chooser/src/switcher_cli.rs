@@ -7,7 +7,7 @@
 //!
 //! For the xdg-desktop-portal-wlr picker (prints to stdout), see `wlr-chooser`.
 
-use crate::ui::{Live, Mode, Options, View};
+use crate::ui::{self, Live, Mode, Options, View};
 use crate::{acquire_switch_lock, run_overlay};
 use crate::{i18n, tr};
 use clap::{Parser, ValueEnum};
@@ -87,6 +87,62 @@ struct Cli {
     doctor: bool,
 }
 
+/// What the switcher has to offer, resolved before the overlay is raised.
+enum Candidates {
+    /// `--scratchpad` was asked for but sway's IPC didn't answer (no `SWAYSOCK`, no
+    /// `swaymsg`, not sway), so the filter can't be evaluated at all.
+    Unavailable,
+    /// No windows to switch between: do nothing rather than raise an overlay with no
+    /// tiles in it.
+    Empty,
+    /// Exactly one window — nothing to choose *between*, so focus it directly.
+    Sole(Box<ui::Selection>),
+    /// Several windows: raise the overlay as usual.
+    Choose,
+}
+
+/// Resolve what the switcher would actually put on screen. Independent of *why* the
+/// list came out the size it did: `--scratchpad` decides what goes in, this decides
+/// whether an overlay is worth raising over what came out.
+///
+/// Applies the same filters [`ui::App::visible`] would, so the count here matches the
+/// tiles the user would have seen — `--scratchpad`, plus the app-id-less "system"
+/// windows that stay hidden without `--include-system`. (Mode and the search box need
+/// no handling: the switcher is always [`Mode::Windows`], and the filter starts empty.)
+fn resolve_candidates(
+    toplevels: &[wlr_capture::wl::Toplevel],
+    scratchpad: bool,
+    show_system: bool,
+) -> Candidates {
+    let windows = if scratchpad {
+        match ui::scratchpad_windows(toplevels) {
+            Some(w) => w,
+            None => return Candidates::Unavailable,
+        }
+    } else {
+        ui::ordered_windows(toplevels)
+    };
+    let windows: Vec<_> = windows
+        .into_iter()
+        .filter(|(w, _)| show_system || !w.app_id.is_empty())
+        .collect();
+
+    match windows.as_slice() {
+        [] => Candidates::Empty,
+        // The selection the overlay would have returned had it been shown, so the
+        // caller runs its ordinary "picked something" path.
+        [(w, dup_index)] => Candidates::Sole(Box::new(ui::Selection {
+            token: format!("Window: {}", w.identifier),
+            is_window: true,
+            identifier: w.identifier.clone(),
+            app_id: w.app_id.clone(),
+            title: w.title.clone(),
+            dup_index: *dup_index,
+        })),
+        _ => Candidates::Choose,
+    }
+}
+
 pub fn main() {
     let t0 = Instant::now();
     let cli = Cli::parse();
@@ -101,10 +157,6 @@ pub fn main() {
             std::process::exit(1);
         }
         return;
-    }
-
-    if cli.scratchpad {
-        crate::require_sway_ipc();
     }
 
     // Single-instance guard: re-pressing the keybind while we're up is a no-op
@@ -142,16 +194,45 @@ pub fn main() {
     // capture source (wlroots >= 0.20 / Sway >= 1.12). On older compositors connect()
     // now succeeds for screen-only capture, but there are no windows to offer — so say
     // so clearly and exit, instead of showing an empty dimmed overlay (issue #1).
-    match wl::Client::connect() {
+    // The same client also settles whether an overlay is worth raising at all, off the
+    // toplevels it has already enumerated — cheaper than a second connection on what is
+    // a held-modifier hot path.
+    let candidates = match wl::Client::connect() {
         Ok(client) if !client.can_capture_windows() => {
             eprintln!("{}", tr!("capture-no-window"));
             std::process::exit(2);
         }
-        Ok(_) => {}
+        Ok(client) => resolve_candidates(client.toplevels(), cli.scratchpad, cli.include_system),
         Err(e) => {
             eprintln!("{}", tr!("error", error = format!("{e:#}")));
             std::process::exit(2);
         }
+    };
+
+    match candidates {
+        Candidates::Unavailable => {
+            eprintln!(
+                "{}",
+                tr!(
+                    "error",
+                    error = "--scratchpad needs sway's IPC (is SWAYSOCK set?)"
+                )
+            );
+            std::process::exit(2);
+        }
+        // Nothing to switch to: a no-op, like losing the single-instance race.
+        Candidates::Empty => return,
+        // One window, so nothing to choose between: focus it, no overlay. Worth doing
+        // even unfiltered — the sole window is not necessarily the focused one (it may
+        // sit on another workspace), and a one-tile overlay tells the user nothing.
+        Candidates::Sole(sel) => {
+            if let Err(e) = wl::activate_window(&sel.app_id, &sel.title, sel.dup_index) {
+                eprintln!("{}", tr!("error", error = format!("{e:#}")));
+                std::process::exit(2);
+            }
+            return;
+        }
+        Candidates::Choose => {}
     }
 
     match run_overlay(opts, t0) {

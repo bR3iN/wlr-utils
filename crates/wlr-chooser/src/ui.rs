@@ -158,6 +158,45 @@ fn round_budget() -> Duration {
     }
 }
 
+/// The toplevels in the order the overlay presents them (by app-id, then title), each
+/// paired with its `dup_index`: its ordinal among the windows sharing that exact
+/// (app_id, title), in creation order.
+///
+/// Always number the **whole** list, then filter — never the reverse. `dup_index` is
+/// how [`wl::activate_window`] tells identically-named windows apart, and it counts
+/// through zwlr's enumeration of *every* window; an ordinal taken over a filtered
+/// subset (`--scratchpad`) would resolve to a different window than the one picked.
+pub fn ordered_windows(toplevels: &[wl::Toplevel]) -> Vec<(wl::Toplevel, usize)> {
+    let mut windows = toplevels.to_vec();
+    // Stable, so windows sharing an (app_id, title) keep their creation order —
+    // which is the order zwlr enumerates them in for activation.
+    windows.sort_by(|a, b| {
+        a.app_id
+            .to_lowercase()
+            .cmp(&b.app_id.to_lowercase())
+            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
+    });
+    let mut dup: HashMap<(String, String), usize> = HashMap::new();
+    windows
+        .into_iter()
+        .map(|w| {
+            let e = dup.entry((w.app_id.clone(), w.title.clone())).or_insert(0);
+            let dup_index = *e;
+            *e += 1;
+            (w, dup_index)
+        })
+        .collect()
+}
+
+/// The windows in sway's scratchpad, as [`ordered_windows`] would list them.
+/// `None` if sway's IPC can't be reached.
+pub fn scratchpad_windows(toplevels: &[wl::Toplevel]) -> Option<Vec<(wl::Toplevel, usize)>> {
+    let scratch = wlr_capture::focus::sway_scratchpad_ids()?;
+    let mut windows = ordered_windows(toplevels);
+    windows.retain(|(w, _)| scratch.contains(&w.identifier));
+    Some(windows)
+}
+
 /// A source paired with what it takes to (re)open its capture session.
 enum Capturable {
     Output(wl::Output),
@@ -210,9 +249,11 @@ pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>, scratchpad: 
         // outputs first (sorted by name), then windows (by app-id, then title).
         let mut outputs = client.outputs().to_vec();
         outputs.sort_by(|a, b| a.name.cmp(&b.name));
-        let mut windows = client.toplevels().to_vec();
+        // Numbered over *every* window, before `--scratchpad` drops any: see
+        // [`ordered_windows`] for why a filtered subset would mis-number.
+        let mut windows = ordered_windows(client.toplevels());
         if scratchpad {
-            let ids: Vec<String> = windows.iter().map(|w| w.identifier.clone()).collect();
+            let ids: Vec<String> = windows.iter().map(|(w, _)| w.identifier.clone()).collect();
             if ids != scratch_for {
                 scratch_for = ids;
                 // Keep the last known set if the query fails (sway gone, swaymsg
@@ -221,27 +262,15 @@ pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>, scratchpad: 
                     scratch = s;
                 }
             }
-            windows.retain(|w| scratch.contains(&w.identifier));
+            windows.retain(|(w, _)| scratch.contains(&w.identifier));
         }
-        windows.sort_by(|a, b| {
-            a.app_id
-                .to_lowercase()
-                .cmp(&b.app_id.to_lowercase())
-                .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-        });
 
         let mut current: Vec<(Source, Capturable)> = Vec::new();
         for o in &outputs {
             current.push((output_source(o), Capturable::Output(o.clone())));
         }
-        // Number windows that share an (app_id, title); the stable sort keeps
-        // them in creation order, matching zwlr's enumeration for activation.
-        let mut dup: HashMap<(String, String), usize> = HashMap::new();
-        for w in &windows {
-            let e = dup.entry((w.app_id.clone(), w.title.clone())).or_insert(0);
-            let dup_index = *e;
-            *e += 1;
-            current.push((window_source(w, dup_index), Capturable::Window(w.clone())));
+        for (w, dup_index) in &windows {
+            current.push((window_source(w, *dup_index), Capturable::Window(w.clone())));
         }
         let keys: Vec<String> = current.iter().map(|(s, _)| s.key.clone()).collect();
 
@@ -543,8 +572,8 @@ pub struct Options {
     /// Which Alt-Tab tiles show a live preview (vs. just the icon).
     pub live: Live,
     /// Offer only the windows in sway's scratchpad. Sway-only (see
-    /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids));
-    /// the CLIs reject it when `SWAYSOCK` is unset.
+    /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids)) and
+    /// wlr-switcher-only; the portal picker always leaves this off.
     pub scratchpad: bool,
 }
 

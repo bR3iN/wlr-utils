@@ -37,11 +37,6 @@ struct Cli {
     /// Include windows with no app-id (system surfaces)
     #[arg(long)]
     include_system: bool,
-    /// Offer only the windows in sway's scratchpad (sway-only; needs SWAYSOCK).
-    /// Includes scratchpad windows that are currently shown. Combine with -w to
-    /// drop the monitors too.
-    #[arg(long)]
-    scratchpad: bool,
     /// Show a fixed COLSxROWS grid of thumbnails (e.g. 4x3)
     #[arg(long, value_name = "COLSxROWS", value_parser = parse_grid)]
     grid: Option<(u32, u32)>,
@@ -75,10 +70,6 @@ pub fn main() {
         return;
     }
 
-    if cli.scratchpad {
-        crate::require_sway_ipc();
-    }
-
     let _ = cli.both; // default; accepted for symmetry with -w/-o
     let mode = if cli.windows {
         Mode::Windows
@@ -94,7 +85,9 @@ pub fn main() {
         view: View::Card,
         hold: false,
         live: Live::All,
-        scratchpad: cli.scratchpad,
+        // Scratchpad filtering is a wlr-switcher feature; the portal picker offers
+        // monitors too, where "the windows in the scratchpad" means little.
+        scratchpad: false,
     };
 
     match run_overlay(opts, t0) {
