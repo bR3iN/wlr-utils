@@ -63,6 +63,10 @@ struct State {
     width: u32,
     height: u32,
     scale: u32,
+    /// Overlay size multiplier (`--scale`), folded into the pixels-per-point egui lays
+    /// out at: points shrink by it, so every tile, glyph and gap grows by it. Surface
+    /// coordinates (the layer surface's logical pixels) are divided by it on the way in.
+    ui_scale: f32,
 
     start: Instant,
     events: Vec<egui::Event>,
@@ -179,6 +183,7 @@ pub fn run(app: App, t0: Instant) -> anyhow::Result<()> {
     tlog(t0, "theme + fonts installed");
 
     let hold = app.hold();
+    let ui_scale = app.scale();
     let mut state = State {
         registry_state: RegistryState::new(&globals),
         seat_state: SeatState::new(&globals, &qh),
@@ -194,6 +199,7 @@ pub fn run(app: App, t0: Instant) -> anyhow::Result<()> {
         width: 0,
         height: 0,
         scale: 1,
+        ui_scale,
         start: Instant::now(),
         events: Vec::new(),
         modifiers: egui::Modifiers::default(),
@@ -235,7 +241,7 @@ impl State {
         let raw_input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
                 egui::Pos2::ZERO,
-                egui::vec2(self.width as f32, self.height as f32),
+                egui::vec2(self.width as f32, self.height as f32) / self.ui_scale,
             )),
             time: Some(self.start.elapsed().as_secs_f64()),
             events: std::mem::take(&mut self.events),
@@ -250,7 +256,7 @@ impl State {
         gpu.render(
             &self.egui_ctx,
             raw_input,
-            self.scale as f32,
+            self.scale as f32 * self.ui_scale,
             (pw, ph),
             backdrop,
             |ui, imp| app.run_ui(ui, imp),
@@ -651,7 +657,10 @@ impl PointerHandler for State {
         events: &[PointerEvent],
     ) {
         for e in events {
-            let pos = egui::pos2(e.position.0 as f32, e.position.1 as f32);
+            // Surface coordinates are logical pixels; egui thinks in points, which
+            // `--scale` makes bigger than one logical pixel.
+            let pos = (egui::vec2(e.position.0 as f32, e.position.1 as f32) / self.ui_scale)
+                .to_pos2();
             match e.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
                     self.pointer_pos = pos;
@@ -681,7 +690,8 @@ impl PointerHandler for State {
                     horizontal,
                     ..
                 } => {
-                    let delta = egui::vec2(-horizontal.absolute as f32, -vertical.absolute as f32);
+                    let delta = egui::vec2(-horizontal.absolute as f32, -vertical.absolute as f32)
+                        / self.ui_scale;
                     self.events.push(egui::Event::MouseWheel {
                         unit: egui::MouseWheelUnit::Point,
                         delta,

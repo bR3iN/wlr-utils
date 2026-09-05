@@ -31,6 +31,17 @@ pub fn parse_grid(s: &str) -> Result<(u32, u32), String> {
     Ok((n(c, "columns")?, n(r, "rows")?))
 }
 
+/// Parse `--scale`: a linear size multiplier for the overlay, `1.0` being the built-in
+/// size. Bounded because the value ends up dividing the screen into points — small
+/// enough and the UI is unreadable, large enough and a single tile no longer fits.
+pub fn parse_scale(s: &str) -> Result<f32, String> {
+    s.trim()
+        .parse::<f32>()
+        .ok()
+        .filter(|v| v.is_finite() && (0.25..=4.0).contains(v))
+        .ok_or_else(|| "expected a number between 0.25 and 4.0, e.g. 1.5".to_string())
+}
+
 /// Acquire the single-instance advisory lock for the interactive switcher.
 /// Returns the held lock file (keep it alive), or `None` if another instance owns
 /// it — sway processes its own keybinding even over our exclusive keyboard grab,
@@ -61,7 +72,8 @@ pub fn run_overlay(opts: ui::Options, t0: Instant) -> anyhow::Result<Option<ui::
     let flag = gpu_failed.clone();
     let scratchpad = opts.scratchpad;
     let mru = opts.focus.order.clone();
-    std::thread::spawn(move || ui::capture_thread(tx, flag, scratchpad, mru));
+    let scale = opts.scale;
+    std::thread::spawn(move || ui::capture_thread(tx, flag, scratchpad, mru, scale));
     shell::tlog(t0, "capture-thread spawned");
 
     let out: ui::Outcome = Arc::new(Mutex::new(None));
@@ -85,6 +97,24 @@ mod tests {
         assert_eq!(parse_grid("2×5"), Ok((2, 5)));
         // Surrounding whitespace on either factor is tolerated.
         assert_eq!(parse_grid(" 4 x 3 "), Ok((4, 3)));
+    }
+
+    #[test]
+    fn parse_scale_takes_positive_factors_in_range() {
+        assert_eq!(parse_scale("1"), Ok(1.0));
+        assert_eq!(parse_scale(" 1.5 "), Ok(1.5));
+        assert_eq!(parse_scale("0.25"), Ok(0.25));
+        assert_eq!(parse_scale("4"), Ok(4.0));
+    }
+
+    #[test]
+    fn parse_scale_rejects_out_of_range_and_nonsense() {
+        assert!(parse_scale("0").is_err());
+        assert!(parse_scale("-2").is_err());
+        assert!(parse_scale("4.5").is_err());
+        assert!(parse_scale("nan").is_err());
+        assert!(parse_scale("big").is_err());
+        assert!(parse_scale("").is_err());
     }
 
     #[test]

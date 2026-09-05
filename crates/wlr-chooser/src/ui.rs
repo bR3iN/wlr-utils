@@ -40,7 +40,7 @@ const TILE_W: f32 = 300.0; // reference tile size (aspect ratio for the thumbnai
 const TILE_H: f32 = 180.0;
 const MIN_TILE: f32 = 280.0; // tiles grow from here to fill the row width
 const GRID_GAP: f32 = 10.0; // gap between tiles
-const THUMB_MAX: u32 = 480;
+const THUMB_MAX: u32 = 480; // thumbnail cap at `--scale 1`; scaled with it
 
 /// Which kinds of source to show. Set by `--windows`/`--outputs`/`--both` and
 /// switchable at runtime via the tab bar.
@@ -329,7 +329,12 @@ pub fn capture_thread(
     gpu_failed: Arc<AtomicBool>,
     scratchpad: Scratchpad,
     mru: Vec<String>,
+    scale: f32,
 ) {
+    // Bigger tiles want more pixels: the shm thumbnail cap follows `--scale`, so a
+    // scaled-up overlay isn't blowing a 480-px preview up to twice the size. (The
+    // dma-buf path imports the window's own buffer, so it needs no such nudge.)
+    let thumb_max = ((THUMB_MAX as f32 * scale).round() as u32).max(1);
     let mut client = match wl::Client::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -473,7 +478,7 @@ pub fn capture_thread(
             let Some(key) = by_id.get(&id) else { continue };
             let msg = match frame {
                 wl::Frame::Shm(img) => {
-                    let (w, h, rgba) = thumbnail(img);
+                    let (w, h, rgba) = thumbnail(img, thumb_max);
                     Msg::Thumb {
                         key: key.clone(),
                         w,
@@ -648,12 +653,11 @@ fn window_source(w: &wl::Toplevel, dup_index: usize) -> Source {
     }
 }
 
-/// Downscale a capture to a thumbnail (max side `THUMB_MAX`), never upscaling.
-fn thumbnail(img: wl::CapturedImage) -> (usize, usize, Vec<u8>) {
+/// Downscale a capture to a thumbnail (max side `max`, [`THUMB_MAX`] at `--scale 1`),
+/// never upscaling.
+fn thumbnail(img: wl::CapturedImage, max: u32) -> (usize, usize, Vec<u8>) {
     let (w, h) = (img.width, img.height);
-    let scale = (THUMB_MAX as f32 / w as f32)
-        .min(THUMB_MAX as f32 / h as f32)
-        .min(1.0);
+    let scale = (max as f32 / w as f32).min(max as f32 / h as f32).min(1.0);
     let src = match image::RgbaImage::from_raw(w, h, img.rgba) {
         Some(s) => s,
         None => return (0, 0, Vec::new()),
@@ -696,6 +700,12 @@ pub struct Options {
     /// listed in this order, and it decides whether the Alt-Tab initial advance
     /// happens. Default (empty, nothing focused) when sway's IPC was unavailable.
     pub focus: wlr_capture::focus::FocusOrder,
+    /// Linear size multiplier for the whole overlay (`--scale`): `1.0` is the built-in
+    /// size, `2.0` draws every tile, glyph and gap twice as wide and tall. Applied as a
+    /// pixels-per-point factor in [`shell`](crate::shell), so nothing in this module
+    /// has to know about it — except the thumbnail cap, which follows it so scaled-up
+    /// tiles get the pixels to fill them.
+    pub scale: f32,
 }
 
 pub struct App {
@@ -753,6 +763,9 @@ pub struct App {
     focus_filter: bool,
     /// Set once a choice is made or the picker is cancelled; the host loop exits.
     closing: bool,
+    /// Overlay size multiplier (see [`Options::scale`]); the host reads it back with
+    /// [`App::scale`] to fold into pixels-per-point.
+    scale: f32,
     out: Outcome,
     theme: Theme,
 }
@@ -793,9 +806,17 @@ impl App {
             confirm_pending: false,
             focus_filter: true,
             closing: false,
+            scale: opts.scale,
             out,
             theme,
         }
+    }
+
+    /// The overlay size multiplier (`--scale`). The host folds it into the
+    /// pixels-per-point it lays the UI out at, so points shrink and everything drawn in
+    /// them — tiles, text, gaps — comes out that much bigger.
+    pub fn scale(&self) -> f32 {
+        self.scale
     }
 
     /// True once a selection or cancellation happened; the host loop should exit.
@@ -1869,6 +1890,7 @@ mod tests {
                 order: keys.iter().map(|k| k.to_string()).collect(),
                 focused: focused.map(String::from),
             },
+            scale: 1.0,
         };
         let mut app = App::new(
             rx,

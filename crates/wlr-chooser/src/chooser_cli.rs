@@ -10,7 +10,7 @@
 use crate::keys::CycleKeys;
 use crate::ui::{self, Live, Mode, Options, Scratchpad, View};
 use crate::{i18n, tr};
-use crate::{parse_grid, run_overlay};
+use crate::{parse_grid, parse_scale, run_overlay};
 use clap::Parser;
 use std::time::Instant;
 
@@ -35,6 +35,10 @@ struct Cli {
     /// Show both windows and screens (default)
     #[arg(long, group = "what")]
     both: bool,
+    /// Size multiplier for the picker: `1.0` (default) is the built-in size, `2.0`
+    /// draws the card, its tiles and its text twice as wide and tall.
+    #[arg(long, value_name = "FACTOR", value_parser = parse_scale, default_value = "1.0")]
+    scale: f32,
     /// Include windows with no app-id (system surfaces)
     #[arg(long)]
     include_system: bool,
@@ -95,6 +99,7 @@ pub fn main() {
         // Offer windows most-recently-focused first: the one you were just on is the
         // one you are most likely to be sharing. Default (alphabetical) off sway.
         focus: wlr_capture::focus::sway_focus_order().unwrap_or_default(),
+        scale: cli.scale,
     };
 
     match run_overlay(opts, t0) {

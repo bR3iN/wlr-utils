@@ -117,6 +117,7 @@ focused output. You can pass options in `chooser_cmd`, e.g.
     --both             Show both (default)
     --include-system   Include windows with no app-id (system surfaces)
     --grid COLSxROWS   Fixed grid of that many thumbnails (e.g. 4x3)
+    --scale FACTOR     Size multiplier for the overlay (default 1.0)
 -h, --help             Print help
 -V, --version          Print version
 ```
@@ -146,6 +147,22 @@ Three presentations via `--layout`:
 Each tile shows a live preview with the app icon as a badge; tune it with
 `--live none|current|all` (default `all`): `current` previews only the highlighted
 window, `none` shows app icons only.
+
+### Overlay size
+
+`--scale FACTOR` (0.25–4.0, default `1.0`) scales the whole overlay — tiles,
+icons, text and gaps alike — for a big display or tired eyes:
+
+```
+bindsym Mod1+Tab exec wlr-switcher --scale 1.4
+```
+
+It is a linear factor, so `--scale 2` draws tiles twice as wide and twice as tall
+(four times the area) and captures previews at twice the resolution to fill them.
+The strip still shrinks its tiles to keep the row on screen, so a scaled-up strip
+with many windows open lands wherever the width allows; the exposé already fills
+the screen, so there `--scale` grows the labels and gaps rather than the tiles.
+`wlr-chooser` takes the same option.
 
 ### True Alt-Tab (hold-to-switch)
 

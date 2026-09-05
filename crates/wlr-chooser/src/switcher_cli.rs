@@ -9,7 +9,7 @@
 
 use crate::keys::{self, CycleKeys};
 use crate::ui::{self, Live, Mode, Options, Scratchpad, View};
-use crate::{acquire_switch_lock, run_overlay};
+use crate::{acquire_switch_lock, parse_scale, run_overlay};
 use crate::{i18n, tr};
 use clap::{Parser, ValueEnum};
 use std::time::Instant;
@@ -85,6 +85,12 @@ struct Cli {
     /// different keys and each means what it says.
     #[arg(long, value_name = "KEY", value_parser = keys::parse, default_value = "Tab")]
     cycle_prev: egui::Key,
+    /// Size multiplier for the overlay: `1.0` (default) is the built-in size, `2.0`
+    /// draws every tile, icon and label twice as wide and tall. The strip still shrinks
+    /// its tiles to keep the row on screen; the exposé already fills the screen, so
+    /// there it grows the labels and gaps rather than the tiles.
+    #[arg(long, value_name = "FACTOR", value_parser = parse_scale, default_value = "1.0")]
+    scale: f32,
     /// Include windows with no app-id (system surfaces)
     #[arg(long)]
     include_system: bool,
@@ -234,6 +240,7 @@ pub fn main() {
         // tiles (most recently focused first) and decides whether Alt-Tab's initial
         // advance applies. Re-querying later would let the strip reshuffle mid-switch.
         focus: wlr_capture::focus::sway_focus_order().unwrap_or_default(),
+        scale: cli.scale,
     };
 
     // Pre-flight: wlr-switcher switches *windows*, which need the foreign-toplevel
