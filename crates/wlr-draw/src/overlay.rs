@@ -34,7 +34,10 @@ use smithay_client_toolkit::{
     seat::{
         Capability, SeatHandler, SeatState,
         keyboard::{KeyEvent, KeyboardHandler, Keysym, Modifiers, RawModifiers},
-        pointer::{AxisScroll, PointerEvent, PointerEventKind, PointerHandler},
+        pointer::{
+            AxisScroll, CursorIcon, PointerEvent, PointerEventKind, PointerHandler, ThemeSpec,
+            ThemedPointer,
+        },
     },
     shell::{
         WaylandSurface,
@@ -43,6 +46,7 @@ use smithay_client_toolkit::{
             LayerSurfaceConfigure,
         },
     },
+    shm::{Shm, ShmHandler},
 };
 use std::time::{Duration, Instant};
 use wayland_client::{
@@ -249,7 +253,15 @@ struct State {
     seat_state: SeatState,
     output_state: OutputState,
     keyboard: Option<wl_keyboard::WlKeyboard>,
-    pointer: Option<wl_pointer::WlPointer>,
+    /// Themed, so the overlay can set its own cursor while it holds pointer focus
+    /// ([`State::apply_cursor`]).
+    pointer: Option<ThemedPointer>,
+    /// Only used to load an XCursor theme for that cursor, on compositors too old for
+    /// `cursor-shape-v1` (where the image comes from the compositor instead).
+    shm: Shm,
+    /// Kept so the cursor can be re-set outside a Wayland callback (on a tool change),
+    /// since the XCursor path needs a connection to load the theme.
+    conn: Connection,
     /// Calloop handle, needed to wire up keyboard repeat when the seat appears.
     loop_handle: LoopHandle<'static, State>,
     surfaces: Vec<Surface>,
@@ -432,6 +444,30 @@ impl State {
             frame_pending: false,
             needs_redraw: false,
         });
+    }
+
+    /// The cursor to show while the overlay holds the pointer, per tool.
+    fn cursor_icon(&self) -> CursorIcon {
+        match self.tool {
+            Tool::Text => CursorIcon::Text,
+            Tool::Move => CursorIcon::Grab,
+            _ => CursorIcon::Crosshair,
+        }
+    }
+
+    /// Set our own cursor image on the seat.
+    ///
+    /// A Wayland client owns the cursor while it has pointer focus, and one that never
+    /// sets it leaves the compositor showing whatever was there before — nothing at all
+    /// when the cursor had been hidden on idle, so draw mode was entered blind. The
+    /// image is reset on every enter, so this must be re-sent then, and again whenever
+    /// the tool changes.
+    fn apply_cursor(&self) {
+        if let Some(p) = self.pointer.as_ref() {
+            // Fails only when we hold no enter serial (the pointer is elsewhere) — then
+            // the cursor isn't ours to set and the next enter will do it.
+            let _ = p.set_cursor(&self.conn, self.cursor_icon());
+        }
     }
 
     /// Enter or leave draw mode: switch every surface between a full input region +
@@ -781,6 +817,7 @@ impl State {
                     self.deselect();
                 }
                 self.tool = t;
+                self.apply_cursor();
                 self.dirty = true;
                 self.sync_tray();
             }
@@ -1211,6 +1248,9 @@ pub fn run() -> anyhow::Result<()> {
     let layer_shell =
         LayerShell::bind(&globals, &qh).map_err(|e| anyhow::anyhow!("layer-shell missing: {e}"))?;
     let empty_region = Region::new(&compositor).map_err(|e| anyhow::anyhow!("wl_region: {e}"))?;
+    // Core protocol, so this is present everywhere; it only backs the XCursor fallback
+    // for the pointer theme.
+    let shm = Shm::bind(&globals, &qh).map_err(|e| anyhow::anyhow!("wl_shm: {e}"))?;
 
     // The calloop loop is created up front so its handle can be handed to the keyboard
     // (for repeat) when the seat capability appears during the roundtrips below.
@@ -1225,6 +1265,8 @@ pub fn run() -> anyhow::Result<()> {
         output_state: OutputState::new(&globals, &qh),
         keyboard: None,
         pointer: None,
+        shm,
+        conn: conn.clone(),
         loop_handle: lh.clone(),
         surfaces: Vec::new(),
         compositor,
@@ -2364,7 +2406,19 @@ impl SeatHandler for State {
                 .ok();
         }
         if cap == Capability::Pointer && self.pointer.is_none() {
-            self.pointer = self.seat_state.get_pointer(qh, &seat).ok();
+            // Themed: `set_cursor` then goes through `cursor-shape-v1` when the
+            // compositor has it, and falls back to an XCursor buffer on this surface.
+            let cursor_surface = self.compositor.create_surface(qh);
+            self.pointer = self
+                .seat_state
+                .get_pointer_with_theme::<Self, ()>(
+                    qh,
+                    &seat,
+                    self.shm.wl_shm(),
+                    cursor_surface,
+                    ThemeSpec::default(),
+                )
+                .ok();
         }
     }
     fn remove_capability(
@@ -2522,6 +2576,11 @@ impl PointerHandler for State {
         for e in events {
             match e.kind {
                 PointerEventKind::Enter { .. } | PointerEventKind::Motion { .. } => {
+                    // The cursor is ours to draw for as long as we hold focus, and the
+                    // compositor resets it on each enter.
+                    if matches!(e.kind, PointerEventKind::Enter { .. }) {
+                        self.apply_cursor();
+                    }
                     if let Some(g) = self.to_global(&e.surface, e.position) {
                         self.pointer_pos = Some(g);
                         if !matches!(self.gesture, Gesture::None) {
@@ -2626,6 +2685,12 @@ impl OutputHandler for State {
         output: wl_output::WlOutput,
     ) {
         self.surfaces.retain(|s| s.output != output);
+    }
+}
+
+impl ShmHandler for State {
+    fn shm_state(&mut self) -> &mut Shm {
+        &mut self.shm
     }
 }
 
