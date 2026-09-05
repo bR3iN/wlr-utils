@@ -124,14 +124,15 @@ fn resolve_candidates(
     toplevels: &[wlr_capture::wl::Toplevel],
     scratchpad: bool,
     show_system: bool,
+    mru: &[String],
 ) -> Candidates {
     let windows = if scratchpad {
-        match ui::scratchpad_windows(toplevels) {
+        match ui::scratchpad_windows(toplevels, mru) {
             Some(w) => w,
             None => return Candidates::Unavailable,
         }
     } else {
-        ui::ordered_windows(toplevels)
+        ui::ordered_windows(toplevels, mru)
     };
     let windows: Vec<_> = windows
         .into_iter()
@@ -203,6 +204,10 @@ pub fn main() {
             next: cli.cycle_next,
             prev: cli.cycle_prev,
         },
+        // Taken once, here, before anything of ours can hold the focus: it orders the
+        // tiles (most recently focused first) and decides whether Alt-Tab's initial
+        // advance applies. Re-querying later would let the strip reshuffle mid-switch.
+        focus: wlr_capture::focus::sway_focus_order().unwrap_or_default(),
     };
 
     // Pre-flight: wlr-switcher switches *windows*, which need the foreign-toplevel
@@ -217,7 +222,12 @@ pub fn main() {
             eprintln!("{}", tr!("capture-no-window"));
             std::process::exit(2);
         }
-        Ok(client) => resolve_candidates(client.toplevels(), cli.scratchpad, cli.include_system),
+        Ok(client) => resolve_candidates(
+            client.toplevels(),
+            cli.scratchpad,
+            cli.include_system,
+            &opts.focus.order,
+        ),
         Err(e) => {
             eprintln!("{}", tr!("error", error = format!("{e:#}")));
             std::process::exit(2);

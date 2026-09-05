@@ -92,6 +92,9 @@ pub fn main() {
         // Rebindable cycling is a wlr-switcher feature too: the picker is a card with
         // a search field, where Tab belongs to the field rather than to navigation.
         cycle: CycleKeys::default(),
+        // Offer windows most-recently-focused first: the one you were just on is the
+        // one you are most likely to be sharing. Default (alphabetical) off sway.
+        focus: wlr_capture::focus::sway_focus_order().unwrap_or_default(),
     };
 
     match run_overlay(opts, t0) {

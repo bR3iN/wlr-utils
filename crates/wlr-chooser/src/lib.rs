@@ -60,7 +60,8 @@ pub fn run_overlay(opts: ui::Options, t0: Instant) -> anyhow::Result<Option<ui::
     let gpu_failed = Arc::new(AtomicBool::new(false));
     let flag = gpu_failed.clone();
     let scratchpad = opts.scratchpad;
-    std::thread::spawn(move || ui::capture_thread(tx, flag, scratchpad));
+    let mru = opts.focus.order.clone();
+    std::thread::spawn(move || ui::capture_thread(tx, flag, scratchpad, mru));
     shell::tlog(t0, "capture-thread spawned");
 
     let out: ui::Outcome = Arc::new(Mutex::new(None));

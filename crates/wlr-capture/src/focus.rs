@@ -112,25 +112,119 @@ impl FocusBackend for Sway {
 /// non-`none` `scratchpad_state` until it is moved back to a workspace, so it is
 /// included here too.
 ///
+/// Membership is inherited: sending a whole container to the scratchpad puts every
+/// window under it in here, even though sway flags only the container itself.
+///
 /// Sway-only (needs `SWAYSOCK`); `None` if the query fails or the reply won't parse.
 pub fn sway_scratchpad_ids() -> Option<HashSet<String>> {
     Some(sway_scratchpad_identifiers(&Sway::query("get_tree")?))
 }
 
-/// Collect the `foreign_toplevel_identifier` of every node in a sway `get_tree` whose
-/// `scratchpad_state` is not `"none"`. Free function so it's unit-testable without a
-/// live compositor.
+/// Sway's window focus order: which windows exist, most-recently-focused first, and
+/// which one holds the focus right now.
+///
+/// Both fields name windows by `foreign_toplevel_identifier` — the string
+/// [`wl::Toplevel::identifier`](crate::wl::Toplevel::identifier) carries — so callers
+/// order a toplevel list by lookup, with none of the app-id/title guesswork the rest of
+/// this module has to do.
+#[derive(Debug, Clone, Default)]
+pub struct FocusOrder {
+    /// Every window in the tree, most-recently-focused first. Empty if sway's IPC
+    /// couldn't be reached.
+    pub order: Vec<String>,
+    /// The window that currently has the focus, if a *window* does: focus sitting on a
+    /// layer surface or an empty workspace leaves this `None` while `order` still
+    /// records which window was focused last.
+    pub focused: Option<String>,
+}
+
+/// Read sway's focus order out of `get_tree`.
+///
+/// Sway hangs a `focus` array on every container — its children's ids, most recently
+/// focused first — so descending the tree along those arrays enumerates the windows in
+/// focus order. `focused` comes from the `focused: true` flag, which sits on a node only
+/// when a window really has the focus; when it does, it is necessarily `order`'s first
+/// entry, since the same focus arrays lead to it.
+///
+/// A one-shot snapshot, not a subscription: callers take it once at startup and keep it,
+/// so the list can't reshuffle under the user mid-switch.
+///
+/// Sway-only (needs `SWAYSOCK`); `None` if the query fails or the reply won't parse.
+pub fn sway_focus_order() -> Option<FocusOrder> {
+    Some(sway_focus_order_of(&Sway::query("get_tree")?))
+}
+
+/// The tree-walking half of [`sway_focus_order`], split out so it's unit-testable
+/// without a live compositor.
+fn sway_focus_order_of(root: &serde_json::Value) -> FocusOrder {
+    let mut order = Vec::new();
+    collect_focus_order(root, &mut order);
+    FocusOrder {
+        order,
+        focused: find_focused(root)
+            .filter(|n| sway_is_window(n))
+            .and_then(|n| n.get("foreign_toplevel_identifier"))
+            .and_then(|i| i.as_str())
+            .filter(|i| !i.is_empty())
+            .map(String::from),
+    }
+}
+
+fn collect_focus_order(node: &serde_json::Value, out: &mut Vec<String>) {
+    if let Some(id) = node
+        .get("foreign_toplevel_identifier")
+        .and_then(|i| i.as_str())
+        && !id.is_empty()
+    {
+        out.push(id.to_string());
+    }
+    // Rank of a child in this node's `focus` array; children it doesn't name sort to
+    // the back. Sway lists tiled and floating children in the one array, so both child
+    // arrays are ranked together — but the sort is stable, so anything unranked keeps
+    // the tree's own order.
+    let focus: Vec<i64> = node
+        .get("focus")
+        .and_then(|f| f.as_array())
+        .map(|f| f.iter().filter_map(|i| i.as_i64()).collect())
+        .unwrap_or_default();
+    let mut children: Vec<&serde_json::Value> = ["nodes", "floating_nodes"]
+        .iter()
+        .filter_map(|k| node.get(*k))
+        .filter_map(|c| c.as_array())
+        .flatten()
+        .collect();
+    children.sort_by_key(|c| {
+        c.get("id")
+            .and_then(|i| i.as_i64())
+            .and_then(|id| focus.iter().position(|f| *f == id))
+            .unwrap_or(usize::MAX)
+    });
+    for child in children {
+        collect_focus_order(child, out);
+    }
+}
+
+/// Collect the `foreign_toplevel_identifier` of every window in a sway `get_tree` that
+/// sits in the scratchpad. Free function so it's unit-testable without a live
+/// compositor.
 fn sway_scratchpad_identifiers(root: &serde_json::Value) -> HashSet<String> {
     let mut out = HashSet::new();
-    collect_scratchpad(root, &mut out);
+    collect_scratchpad(root, false, &mut out);
     out
 }
 
-fn collect_scratchpad(node: &serde_json::Value, out: &mut HashSet<String>) {
-    if node
-        .get("scratchpad_state")
-        .and_then(|s| s.as_str())
-        .is_some_and(|s| s != "none")
+/// Membership is inherited, hence `in_scratchpad`: sway flags only the node that was
+/// moved (`scratchpad_state != "none"`), so a *container* sent to the scratchpad is the
+/// only flagged node while its children — the ones that actually carry a
+/// `foreign_toplevel_identifier`, since containers never do — still read `"none"`.
+/// Testing each node on its own would drop every window under such a container.
+fn collect_scratchpad(node: &serde_json::Value, in_scratchpad: bool, out: &mut HashSet<String>) {
+    let in_scratchpad = in_scratchpad
+        || node
+            .get("scratchpad_state")
+            .and_then(|s| s.as_str())
+            .is_some_and(|s| s != "none");
+    if in_scratchpad
         && let Some(id) = node
             .get("foreign_toplevel_identifier")
             .and_then(|i| i.as_str())
@@ -141,7 +235,7 @@ fn collect_scratchpad(node: &serde_json::Value, out: &mut HashSet<String>) {
     for key in ["nodes", "floating_nodes"] {
         if let Some(children) = node.get(key).and_then(|c| c.as_array()) {
             for child in children {
-                collect_scratchpad(child, out);
+                collect_scratchpad(child, in_scratchpad, out);
             }
         }
     }
@@ -378,10 +472,12 @@ mod tests {
       }]
     }"#;
 
-    // A trimmed sway `get_tree` covering the three cases the scratchpad filter has to
+    // A trimmed sway `get_tree` covering the cases the scratchpad filter has to
     // separate: an ordinary tiled window, a *hidden* scratchpad window parked on the
-    // `__i3_scratch` workspace, and a scratchpad window currently *shown* on a real
-    // workspace (still `scratchpad_state != "none"`, so still in the scratchpad).
+    // `__i3_scratch` workspace, a scratchpad window currently *shown* on a real
+    // workspace (still `scratchpad_state != "none"`, so still in the scratchpad), and a
+    // whole *container* sent to the scratchpad — flagged on the container, which has no
+    // `foreign_toplevel_identifier`, while its windows carry one but read `"none"`.
     const SWAY_SCRATCHPAD_TREE: &str = r#"{
       "type":"root",
       "nodes":[
@@ -393,6 +489,18 @@ mod tests {
               "type":"floating_con","app_id":"foot","name":"term",
               "scratchpad_state":"fresh","visible":false,
               "foreign_toplevel_identifier":"ext-toplevel-0x1a"
+            },{
+              "type":"floating_con","layout":"tabbed",
+              "scratchpad_state":"fresh","visible":false,
+              "nodes":[{
+                "type":"con","app_id":"kitty","name":"~",
+                "scratchpad_state":"none","visible":false,
+                "foreign_toplevel_identifier":"ext-toplevel-0x4d"
+              },{
+                "type":"con","app_id":"kitty","name":"~",
+                "scratchpad_state":"none","visible":false,
+                "foreign_toplevel_identifier":"ext-toplevel-0x5e"
+              }]
             }]
           }]
         },
@@ -425,7 +533,109 @@ mod tests {
         assert!(ids.contains("ext-toplevel-0x3c"));
         // The ordinary tiled window is not.
         assert!(!ids.contains("ext-toplevel-0x2b"));
-        assert_eq!(ids.len(), 2);
+        assert_eq!(ids.len(), 4);
+    }
+
+    #[test]
+    fn sway_scratchpad_identifiers_collects_windows_under_a_scratchpad_container() {
+        let v: serde_json::Value = serde_json::from_str(SWAY_SCRATCHPAD_TREE).unwrap();
+        let ids = sway_scratchpad_identifiers(&v);
+        // Both windows of the tabbed container that was sent to the scratchpad, even
+        // though only the container carries a non-`none` `scratchpad_state`.
+        assert!(ids.contains("ext-toplevel-0x4d"));
+        assert!(ids.contains("ext-toplevel-0x5e"));
+    }
+
+    // A trimmed sway `get_tree` for the focus order: two workspaces on one output, with
+    // sway's `focus` arrays disagreeing with the tree's own child order at every level,
+    // so a walk that ignored them would come out differently. Workspace 2 is the most
+    // recent, and within it the *second* child holds the focus.
+    const SWAY_FOCUS_TREE: &str = r#"{
+      "type":"root","id":1,"focus":[3],
+      "nodes":[{
+        "type":"output","id":3,"name":"DP-5","focus":[20,10],
+        "nodes":[
+          {
+            "type":"workspace","id":10,"name":"1","focus":[12,11],
+            "nodes":[
+              {"type":"con","id":11,"app_id":"firefox","name":"Page","focus":[],
+               "focused":false,"foreign_toplevel_identifier":"ext-3"},
+              {"type":"con","id":12,"app_id":"foot","name":"term","focus":[],
+               "focused":false,"foreign_toplevel_identifier":"ext-2"}
+            ]
+          },
+          {
+            "type":"workspace","id":20,"name":"2","focus":[22,21],
+            "nodes":[
+              {"type":"con","id":21,"app_id":"alacritty","name":"shell","focus":[],
+               "focused":false,"foreign_toplevel_identifier":"ext-4"},
+              {"type":"con","id":22,"app_id":"emacs","name":"main.rs","focus":[],
+               "focused":true,"foreign_toplevel_identifier":"ext-1"}
+            ]
+          }
+        ]
+      }]
+    }"#;
+
+    #[test]
+    fn sway_focus_order_lists_windows_most_recently_focused_first() {
+        let v: serde_json::Value = serde_json::from_str(SWAY_FOCUS_TREE).unwrap();
+        let f = sway_focus_order_of(&v);
+        // Down the `focus` arrays: workspace 2 before workspace 1, and within each the
+        // focus array's order, not the tree's.
+        assert_eq!(f.order, ["ext-1", "ext-4", "ext-2", "ext-3"]);
+        // A window holds the focus, and it necessarily leads the order.
+        assert_eq!(f.focused.as_deref(), Some("ext-1"));
+        assert_eq!(f.order.first().map(String::as_str), f.focused.as_deref());
+    }
+
+    #[test]
+    fn sway_focus_order_reports_no_focused_window_when_none_is_focused() {
+        // Focus on a layer surface or an empty workspace: no node carries
+        // `focused: true`, but the focus arrays still rank the windows.
+        let v: serde_json::Value =
+            serde_json::from_str(&SWAY_FOCUS_TREE.replace("\"focused\":true", "\"focused\":false"))
+                .unwrap();
+        let f = sway_focus_order_of(&v);
+        assert_eq!(f.focused, None);
+        assert_eq!(f.order, ["ext-1", "ext-4", "ext-2", "ext-3"]);
+    }
+
+    #[test]
+    fn sway_focus_order_collects_windows_under_a_scratchpad_container() {
+        // Containers carry no `foreign_toplevel_identifier`, so the walk has to descend
+        // through them — the same shape that broke the scratchpad filter.
+        let v: serde_json::Value = serde_json::from_str(SWAY_SCRATCHPAD_TREE).unwrap();
+        let f = sway_focus_order_of(&v);
+        assert!(f.order.contains(&"ext-toplevel-0x4d".to_string()));
+        assert!(f.order.contains(&"ext-toplevel-0x5e".to_string()));
+        // Every window in the tree is listed, ranked or not.
+        assert_eq!(f.order.len(), 5);
+    }
+
+    #[test]
+    fn sway_focus_order_without_focus_arrays_keeps_tree_order() {
+        // The focus tests' tree carries no `focus` arrays at all: nothing to rank by,
+        // so the walk falls back to the order the tree lists windows in.
+        let v: serde_json::Value = serde_json::from_str(SWAY_TREE).unwrap();
+        let f = sway_focus_order_of(&v);
+        assert_eq!(f.focused, None);
+    }
+
+    #[test]
+    fn sway_scratchpad_state_null_is_not_scratchpad_membership() {
+        // Sway emits `"scratchpad_state": null` on outputs and workspaces — the key is
+        // present, so a `!= "none"` test that doesn't check for a *string* would read
+        // the root as in the scratchpad and, membership being inherited, drag every
+        // window in with it.
+        let v: serde_json::Value = serde_json::from_str(
+            r#"{"type":"root","scratchpad_state":null,
+                "nodes":[{"type":"con","app_id":"foot","name":"term",
+                          "scratchpad_state":"none",
+                          "foreign_toplevel_identifier":"ext-1"}]}"#,
+        )
+        .unwrap();
+        assert!(sway_scratchpad_identifiers(&v).is_empty());
     }
 
     #[test]

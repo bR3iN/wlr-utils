@@ -159,27 +159,20 @@ fn round_budget() -> Duration {
     }
 }
 
-/// The toplevels in the order the overlay presents them (by app-id, then title), each
-/// paired with its `dup_index`: its ordinal among the windows sharing that exact
-/// (app_id, title), in creation order.
+/// Every toplevel paired with its `dup_index`: its ordinal among the windows sharing
+/// that exact (app_id, title), in creation order.
 ///
-/// Always number the **whole** list, then filter — never the reverse. `dup_index` is
-/// how [`wl::activate_window`] tells identically-named windows apart, and it counts
-/// through zwlr's enumeration of *every* window; an ordinal taken over a filtered
-/// subset (`--scratchpad`) would resolve to a different window than the one picked.
-pub fn ordered_windows(toplevels: &[wl::Toplevel]) -> Vec<(wl::Toplevel, usize)> {
-    let mut windows = toplevels.to_vec();
-    // Stable, so windows sharing an (app_id, title) keep their creation order —
-    // which is the order zwlr enumerates them in for activation.
-    windows.sort_by(|a, b| {
-        a.app_id
-            .to_lowercase()
-            .cmp(&b.app_id.to_lowercase())
-            .then_with(|| a.title.to_lowercase().cmp(&b.title.to_lowercase()))
-    });
+/// Numbered in zwlr's own enumeration order and over the **whole** list, before any
+/// ordering or filtering — never the reverse. `dup_index` is how
+/// [`wl::activate_window`] tells identically-named windows apart, and it counts through
+/// zwlr's enumeration of *every* window; an ordinal taken over a filtered subset
+/// (`--scratchpad`), or over a list already resorted for display, would resolve to a
+/// different window than the one picked.
+fn numbered_windows(toplevels: &[wl::Toplevel]) -> Vec<(wl::Toplevel, usize)> {
     let mut dup: HashMap<(String, String), usize> = HashMap::new();
-    windows
-        .into_iter()
+    toplevels
+        .iter()
+        .cloned()
         .map(|w| {
             let e = dup.entry((w.app_id.clone(), w.title.clone())).or_insert(0);
             let dup_index = *e;
@@ -189,11 +182,54 @@ pub fn ordered_windows(toplevels: &[wl::Toplevel]) -> Vec<(wl::Toplevel, usize)>
         .collect()
 }
 
+/// The toplevels in the order the overlay presents them: most-recently-focused first,
+/// per the sway focus order `mru` (identifiers, as
+/// [`focus::sway_focus_order`](wlr_capture::focus::sway_focus_order) reports them),
+/// each paired with its [`numbered_windows`] `dup_index`.
+///
+/// `mru` is a startup snapshot, so it can fall short of the live toplevel list: it is
+/// empty when sway's IPC was unavailable, and it can't know about a window opened
+/// since. Windows it doesn't name sort to the back, in the app-id-then-title order the
+/// picker used before focus order was consulted at all.
+pub fn ordered_windows(toplevels: &[wl::Toplevel], mru: &[String]) -> Vec<(wl::Toplevel, usize)> {
+    let rank: HashMap<&str, usize> = mru
+        .iter()
+        .enumerate()
+        .map(|(i, id)| (id.as_str(), i))
+        .collect();
+    let mut windows = numbered_windows(toplevels);
+    // Stable, so windows that tie — the unranked ones sharing an (app_id, title) —
+    // keep their creation order, which is the order zwlr enumerates them in.
+    windows.sort_by_key(|(w, _)| order_key(&rank, &w.identifier, &w.app_id, &w.title));
+    windows
+}
+
+/// A window's place in [`ordered_windows`]: its focus rank, then app-id, then title.
+///
+/// Ranks are unique, so a ranked window is placed by its rank alone; unranked windows
+/// all share `usize::MAX` and fall to the back, where the app-id/title halves order
+/// them as the picker did before focus order was consulted at all.
+fn order_key(
+    rank: &HashMap<&str, usize>,
+    identifier: &str,
+    app_id: &str,
+    title: &str,
+) -> (usize, String, String) {
+    (
+        rank.get(identifier).copied().unwrap_or(usize::MAX),
+        app_id.to_lowercase(),
+        title.to_lowercase(),
+    )
+}
+
 /// The windows in sway's scratchpad, as [`ordered_windows`] would list them.
 /// `None` if sway's IPC can't be reached.
-pub fn scratchpad_windows(toplevels: &[wl::Toplevel]) -> Option<Vec<(wl::Toplevel, usize)>> {
+pub fn scratchpad_windows(
+    toplevels: &[wl::Toplevel],
+    mru: &[String],
+) -> Option<Vec<(wl::Toplevel, usize)>> {
     let scratch = wlr_capture::focus::sway_scratchpad_ids()?;
-    let mut windows = ordered_windows(toplevels);
+    let mut windows = ordered_windows(toplevels, mru);
     windows.retain(|(w, _)| scratch.contains(&w.identifier));
     Some(windows)
 }
@@ -213,13 +249,22 @@ enum Capturable {
 /// can hide them by default and reveal them on demand. The loop exits when the UI
 /// drops the channel.
 ///
+/// Windows are listed most-recently-focused first, per the `mru` snapshot taken before
+/// the overlay went up — never re-queried, so the list can't reshuffle under the user
+/// mid-switch.
+///
 /// With `scratchpad`, only the windows in sway's scratchpad are offered. The filter
 /// is applied *here* rather than in [`App::visible`] so we never open a capture
 /// session (and dma-buf) for a window that will never be shown.
 // SessionId (a wayland ObjectId) is used as a map key: its interior-mutable
 // "alive" flag is not part of Hash/Eq, so it is a sound key.
 #[allow(clippy::mutable_key_type)]
-pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>, scratchpad: bool) {
+pub fn capture_thread(
+    tx: Sender<Msg>,
+    gpu_failed: Arc<AtomicBool>,
+    scratchpad: bool,
+    mru: Vec<String>,
+) {
     let mut client = match wl::Client::connect() {
         Ok(c) => c,
         Err(e) => {
@@ -247,12 +292,12 @@ pub fn capture_thread(tx: Sender<Msg>, gpu_failed: Arc<AtomicBool>, scratchpad: 
         }
 
         // Build the current source set in a stable, predictable order:
-        // outputs first (sorted by name), then windows (by app-id, then title).
+        // outputs first (sorted by name), then windows (most recently focused first).
         let mut outputs = client.outputs().to_vec();
         outputs.sort_by(|a, b| a.name.cmp(&b.name));
         // Numbered over *every* window, before `--scratchpad` drops any: see
         // [`ordered_windows`] for why a filtered subset would mis-number.
-        let mut windows = ordered_windows(client.toplevels());
+        let mut windows = ordered_windows(client.toplevels(), &mru);
         if scratchpad {
             let ids: Vec<String> = windows.iter().map(|(w, _)| w.identifier.clone()).collect();
             if ids != scratch_for {
@@ -579,6 +624,11 @@ pub struct Options {
     /// Keys that cycle the highlight. `Tab` / `Shift+Tab` unless wlr-switcher was
     /// pointed elsewhere by the environment (see [`crate::keys`]).
     pub cycle: CycleKeys,
+    /// Sway's focus order, taken once before the overlay went up (see
+    /// [`focus::sway_focus_order`](wlr_capture::focus::sway_focus_order)). Windows are
+    /// listed in this order, and it decides whether the Alt-Tab initial advance
+    /// happens. Default (empty, nothing focused) when sway's IPC was unavailable.
+    pub focus: wlr_capture::focus::FocusOrder,
 }
 
 pub struct App {
@@ -616,8 +666,12 @@ pub struct App {
     /// confirm-on-Alt-release. Stays false (classic picker) if Alt is never seen.
     armed: bool,
     /// Whether arming counts the launching chord as a first cycle (see
-    /// [`App::arm`]). Off under `--scratchpad`.
+    /// [`App::arm`]). Off under `--scratchpad`, and off when nothing was focused.
     advance_on_arm: bool,
+    /// The window focused when the snapshot was taken, if one was: the tile the initial
+    /// advance cycles *away* from, so it has to be the one under the highlight for that
+    /// advance to mean anything.
+    focused: Option<String>,
     /// On the first armed frame with sources present, jump the selection to the
     /// next window (index 1) so releasing Alt immediately switches — like a real
     /// Alt-Tab where the launching Tab already advanced once.
@@ -657,9 +711,12 @@ impl App {
             live: opts.live,
             cycle: opts.cycle,
             armed: false,
-            // The initial advance is Alt-Tab's own convention; picking out of the
-            // scratchpad starts on the first window instead.
-            advance_on_arm: !opts.scratchpad,
+            // The initial advance is Alt-Tab's own convention, and it only makes sense
+            // as a step away from the window you were on: with nothing focused there is
+            // no such window, and the first tile is a destination like any other.
+            // Picking out of the scratchpad starts on the first window too.
+            advance_on_arm: !opts.scratchpad && opts.focus.focused.is_some(),
+            focused: opts.focus.focused.clone(),
             pending_initial_select: false,
             focus_filter: true,
             closing: false,
@@ -695,7 +752,8 @@ impl App {
     ///
     /// The jump treats the launching chord as a first cycle — right for `Mod1+Tab`,
     /// whose `Tab` the compositor swallows before we hold focus, so it can never
-    /// reach us. Skipped under `--scratchpad`, which opens on the first window.
+    /// reach us. Skipped under `--scratchpad`, which opens on the first window, and
+    /// skipped when no window was focused to cycle away from.
     pub fn arm(&mut self) {
         if !self.armed {
             self.armed = true;
@@ -852,9 +910,15 @@ impl App {
         // Alt-Tab: once sources exist, jump to the next window so releasing Alt
         // switches immediately (the launching chord counts as the first Tab).
         if self.pending_initial_select {
-            let n = self.visible().len();
-            if n > 0 {
-                self.selected = if n > 1 { 1 } else { 0 };
+            let vis = self.visible();
+            if !vis.is_empty() {
+                // Only a step away from the focused window is a step at all. Focus order
+                // puts that window first, but a tile hidden by `--include-system` or by
+                // the mode filter could have displaced it — and then index 1 would skip
+                // a window rather than land on the previous one.
+                let leads = self.focused.as_deref() == Some(vis[0].key.as_str());
+                let n = vis.len();
+                self.selected = if leads && n > 1 { 1 } else { 0 };
                 self.pending_initial_select = false;
             }
         }
@@ -1612,4 +1676,69 @@ fn draw_window_glyph(p: &egui::Painter, r: egui::Rect, col: egui::Color32) {
         ],
         egui::Stroke::new(1.4, col),
     );
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// `order_key` over a list of (identifier, app_id, title), as `ordered_windows`
+    /// applies it — a stand-in for the real thing, whose `wl::Toplevel` carries a
+    /// protocol handle no unit test can conjure.
+    fn order(mru: &[&str], windows: &[(&str, &str, &str)]) -> Vec<String> {
+        let owned: Vec<String> = mru.iter().map(|s| s.to_string()).collect();
+        let rank: HashMap<&str, usize> = owned
+            .iter()
+            .enumerate()
+            .map(|(i, id)| (id.as_str(), i))
+            .collect();
+        let mut w = windows.to_vec();
+        w.sort_by_key(|(id, app_id, title)| order_key(&rank, id, app_id, title));
+        w.into_iter().map(|(id, _, _)| id.to_string()).collect()
+    }
+
+    #[test]
+    fn ordered_windows_follows_the_focus_order() {
+        // Deliberately anti-alphabetical, so only the focus order can produce it.
+        let got = order(
+            &["c", "a", "b"],
+            &[
+                ("a", "alacritty", "shell"),
+                ("b", "brave", "page"),
+                ("c", "chromium", "tab"),
+            ],
+        );
+        assert_eq!(got, ["c", "a", "b"]);
+    }
+
+    #[test]
+    fn ordered_windows_puts_windows_the_snapshot_missed_last() {
+        // A window opened after the snapshot has no rank: it goes behind every ranked
+        // one rather than displacing them.
+        let got = order(
+            &["z"],
+            &[
+                ("a", "alacritty", "shell"),
+                ("z", "zathura", "doc"),
+                ("b", "brave", "page"),
+            ],
+        );
+        assert_eq!(got, ["z", "a", "b"]);
+    }
+
+    #[test]
+    fn ordered_windows_without_a_snapshot_falls_back_to_app_id_then_title() {
+        // No sway IPC: the old alphabetical order, unchanged.
+        let got = order(
+            &[],
+            &[
+                ("c", "Chromium", "tab"),
+                ("a", "alacritty", "shell"),
+                ("b", "alacritty", "Build"),
+            ],
+        );
+        // Case-insensitive on both halves: "alacritty" before "Chromium", and within
+        // alacritty "Build" before "shell".
+        assert_eq!(got, ["b", "a", "c"]);
+    }
 }
