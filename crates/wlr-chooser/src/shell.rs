@@ -82,9 +82,9 @@ struct State {
     armed_logo: bool,
     /// Previous "an armed modifier is held" state, to detect the release edge.
     prev_held: bool,
-    /// We've painted at least one frame with the modifier genuinely held; gates the
-    /// confirm-on-release so the launching chord's tail can't trigger it.
-    armed_rendered: bool,
+    /// The release we never saw has been inferred (see [`State::infer_release`]);
+    /// keeps it to the one shot.
+    inferred_release: bool,
     /// When the layer surface first got keyboard focus, for the fallback arming
     /// window (some compositors report the held modifier just after `enter`).
     enter_at: Option<Instant>,
@@ -105,6 +105,31 @@ pub fn tlog(t0: Instant, label: &str) {
         );
     }
 }
+
+/// How long after keyboard focus-in a launch modifier may still turn up and arm
+/// hold-to-switch. Some compositors report it just after `enter` rather than in its key
+/// set, so arming keeps listening this long.
+///
+/// Generous costs nothing here: arming late is either harmless (nobody was holding
+/// anything) or exactly right (someone was), and a release we see arms on its own
+/// evidence anyway (see [`State::arm_on_release`]). Only [`INFER_RELEASE_AFTER`] trades
+/// against the user's time.
+const ARM_WINDOW: Duration = Duration::from_millis(300);
+
+/// How long after keyboard focus-in to wait, having seen no launch modifier at all,
+/// before concluding it was released before we held focus (see
+/// [`State::infer_release`]).
+///
+/// Every millisecond of this is delay the user watches, because the overlay is up long
+/// before it elapses and nothing else will resolve the tap. Short enough to feel
+/// immediate, long enough to outlast the focus-in event burst reaching a
+/// just-`exec`'d process on a loaded machine — being early means confirming while the
+/// modifier is still held, which robs the user of the cycle they were about to do.
+///
+/// Well under [`ARM_WINDOW`], which answers a different question and is free to stay
+/// conservative: the focus-in burst that would arm us arrives within a millisecond or
+/// two, so this is still ample margin while staying short enough to pass for immediate.
+const INFER_RELEASE_AFTER: Duration = Duration::from_millis(50);
 
 /// xkb keysyms that count as "Alt" for hold-to-switch (either Alt or Meta).
 fn is_alt(k: Keysym) -> bool {
@@ -180,7 +205,7 @@ pub fn run(app: App, t0: Instant) -> anyhow::Result<()> {
         armed_alt: false,
         armed_logo: false,
         prev_held: false,
-        armed_rendered: false,
+        inferred_release: false,
         enter_at: None,
         t0,
         first_paint_logged: false,
@@ -206,11 +231,6 @@ impl State {
     }
 
     fn render(&mut self) {
-        // Record that we've shown at least one frame with the modifier held; this
-        // gates confirm-on-release (see `reconcile`).
-        if self.armed && self.any_armed_held() {
-            self.armed_rendered = true;
-        }
         let (pw, ph) = (self.width * self.scale, self.height * self.scale);
         let raw_input = egui::RawInput {
             screen_rect: Some(egui::Rect::from_min_size(
@@ -238,6 +258,15 @@ impl State {
     }
 
     fn draw_frame(&mut self, conn: &Connection, qh: &QueueHandle<Self>) {
+        // The frame callback is re-armed every draw, so this is the loop's steady tick —
+        // the only thing that runs when the user has stopped pressing keys, and so the
+        // only place the "no modifier ever turned up" deadline can be noticed.
+        self.infer_release();
+        // Closing already: painting now would flash the overlay on the way out — the
+        // whole point of having kept the frames blank.
+        if self.app.closing() {
+            return;
+        }
         self.ensure_gpu(conn);
         // ask for the next frame so we keep draining the capture channel.
         let surface = self.layer.wl_surface().clone();
@@ -462,9 +491,13 @@ impl KeyboardHandler for State {
             self.modifiers = mods;
             self.events.push(egui::Event::ModifiersChanged(mods));
         }
-        // Authoritative modifier state for hold-to-switch.
-        self.alt_down = modifiers.alt;
-        self.logo_down = modifiers.logo;
+        // Set-only, deliberately. The mask is a *state snapshot* whose ordering against
+        // `enter` varies by compositor, so a zeroed one arriving at focus-in would read
+        // as a release of a key still being held and confirm the picker out from under
+        // the user. Only a key event — an actual transition, which the compositor sends
+        // solely for a key that really moved while we held focus — clears these.
+        self.alt_down |= modifiers.alt;
+        self.logo_down |= modifiers.logo;
         self.reconcile();
     }
 }
@@ -484,34 +517,90 @@ impl State {
         if !self.armed && (self.alt_down || self.logo_down) {
             // Arm at focus-in, or shortly after (some compositors report the held
             // modifier just after `enter` rather than in its key set).
-            let in_window = self
-                .enter_at
-                .is_none_or(|t| t.elapsed() < Duration::from_millis(300));
+            let in_window = self.enter_at.is_none_or(|t| t.elapsed() < ARM_WINDOW);
             if in_window {
                 self.armed = true;
                 self.armed_alt = self.alt_down;
                 self.armed_logo = self.logo_down;
                 self.app.arm();
+                // The modifier is genuinely held, so this is a switch the user is
+                // steering, not a tap passing through: let the tiles be drawn.
+                self.app.reveal();
             }
         }
-        // Confirm on release — but only after we've painted a frame with the
-        // modifier genuinely held, so the launching chord's tail can't fire it.
+        // Confirm on the release edge. No wait for a painted frame: now that only a key
+        // event can clear the flags above, an edge here is a key that genuinely came up
+        // while we held focus, and a tap deserves the switch it asked for — before the
+        // overlay ever appears, if that is how fast it was.
         let held = self.any_armed_held();
-        if self.armed && self.armed_rendered && self.prev_held && !held {
+        if self.armed && self.prev_held && !held {
             self.app.confirm_release();
         }
         self.prev_held = held;
     }
 
-    fn key(&mut self, event: KeyEvent, pressed: bool) {
-        // Raw-keysym modifier tracking: a second, compositor-independent signal
-        // alongside `update_modifiers` (modifier-mask ordering vs. enter varies).
-        if is_alt(event.keysym) {
-            self.alt_down = pressed;
-            self.reconcile();
+    /// A launch modifier came up while we weren't armed, which is proof it was down: the
+    /// key set `enter` handed us must have missed it. Arm on that evidence so the edge
+    /// in [`State::reconcile`] confirms, exactly as if we had seen it held all along.
+    fn arm_on_release(&mut self, alt: bool, logo: bool) {
+        if !self.hold || self.armed {
+            return;
         }
-        if is_logo(event.keysym) {
+        self.armed = true;
+        self.armed_alt = alt;
+        self.armed_logo = logo;
+        self.prev_held = true;
+        self.app.arm();
+    }
+
+    /// No launch modifier ever turned up, and the window for one has passed.
+    ///
+    /// On a hold-to-switch launch that leaves one explanation: the modifier was released
+    /// before the overlay held keyboard focus. The compositor delivers nothing for a
+    /// release that happened while another surface was focused — `enter` reports only
+    /// what is *still* down — so the event we would confirm on can never arrive, and the
+    /// picker would sit there waiting for it.
+    ///
+    /// So conclude it, and then take the ordinary path: this decides one question, and
+    /// having decided it, a tap is a tap. What that switches to is whatever an observed
+    /// release would have switched to.
+    ///
+    /// The cost of being wrong — nothing was held, because the tool was run from a shell
+    /// or bound to a plain key — is an immediate switch instead of a picker, which
+    /// `--no-hold` turns off.
+    fn infer_release(&mut self) {
+        let expired = self
+            .enter_at
+            .is_some_and(|t| t.elapsed() >= INFER_RELEASE_AFTER);
+        if !self.hold || self.armed || self.inferred_release || !expired {
+            return;
+        }
+        // A modifier we can see held is not a modifier that was released; arming simply
+        // came too late for it, and inventing a release on top would be wrong.
+        if self.alt_down || self.logo_down {
+            return;
+        }
+        self.inferred_release = true;
+        // Deliberately no `reveal`: this is the tap, and it closes out of the blank
+        // frames without ever showing the list.
+        self.app.arm();
+        self.app.confirm_release();
+    }
+
+    fn key(&mut self, event: KeyEvent, pressed: bool) {
+        // Raw-keysym modifier tracking: the authoritative signal for hold-to-switch,
+        // and the only one allowed to clear the flags (see `update_modifiers`).
+        let (alt, logo) = (is_alt(event.keysym), is_logo(event.keysym));
+        if alt {
+            self.alt_down = pressed;
+        }
+        if logo {
             self.logo_down = pressed;
+        }
+        if alt || logo {
+            if !pressed {
+                self.arm_on_release(alt, logo);
+            }
             self.reconcile();
         }
         // `Ctrl+[` is the cancel chord shared by every wlr-utils tool; the UI only

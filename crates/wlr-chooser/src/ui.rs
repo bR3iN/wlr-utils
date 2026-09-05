@@ -182,6 +182,15 @@ fn numbered_windows(toplevels: &[wl::Toplevel]) -> Vec<(wl::Toplevel, usize)> {
         .collect()
 }
 
+/// How long the tiles may stay hidden waiting for the tap question to be settled.
+///
+/// Purely a safety net, and deliberately longer than the host's own deadline for that
+/// question: the overlay holds an exclusive keyboard grab, so a path that leaves it
+/// permanently invisible would be far worse than the flash this avoids. Anchored on the
+/// first frame rather than on keyboard focus, because "focus never arrived" is exactly
+/// one of the ways the question can go unanswered.
+const REVEAL_BACKSTOP: f64 = 0.15;
+
 /// The toplevels in the order the overlay presents them: most-recently-focused first,
 /// per the sway focus order `mru` (identifiers, as
 /// [`focus::sway_focus_order`](wlr_capture::focus::sway_focus_order) reports them),
@@ -731,6 +740,15 @@ pub struct App {
     /// next window (index 1) so releasing Alt immediately switches — like a real
     /// Alt-Tab where the launching Tab already advanced once.
     pending_initial_select: bool,
+    /// Whether the tiles are drawn yet. Held back under hold-to-switch until the tap
+    /// question is settled (see [`App::reveal`]), so a tap that resolves in tens of
+    /// milliseconds never flashes a window list on its way past.
+    revealed: bool,
+    /// Time (egui seconds) of the first frame, anchoring [`REVEAL_BACKSTOP`].
+    first_frame_at: Option<f64>,
+    /// A confirm that landed before the source list did — a tap resolved before the
+    /// first frame — carried out as soon as [`App::pump`] delivers the sources.
+    confirm_pending: bool,
     /// Focus the filter field on the first frame.
     focus_filter: bool,
     /// Set once a choice is made or the picker is cancelled; the host loop exits.
@@ -768,6 +786,11 @@ impl App {
             armed: false,
             focused: opts.focus.focused.clone(),
             pending_initial_select: false,
+            // Nothing to wait for without hold-to-switch: there is no tap to mistake the
+            // first frames for, so the picker draws itself immediately as it always did.
+            revealed: !opts.hold,
+            first_frame_at: None,
+            confirm_pending: false,
             focus_filter: true,
             closing: false,
             out,
@@ -813,6 +836,48 @@ impl App {
         }
     }
 
+    /// Alt-Tab: jump the selection to the next window so releasing the modifier
+    /// switches immediately (the launching chord counts as the first Tab). A no-op
+    /// until the sources are in, and once the jump has been made.
+    ///
+    /// Normally run while painting, but a tap can confirm before the first frame, so
+    /// [`App::confirm_release`] runs it too rather than settling for index 0.
+    fn apply_initial_select(&mut self) {
+        if !self.pending_initial_select {
+            return;
+        }
+        let vis = self.visible();
+        if vis.is_empty() {
+            return;
+        }
+        // Only a step away from the focused window is a step at all — so it has to be
+        // on offer, and first, for index 1 to be the window before it. Focus order does
+        // put it first, but it may not be here at all: nothing was focused, or the
+        // scratchpad filter dropped it (`--scratchpad` leaves out everything the
+        // scratchpad is not holding; the plain switcher leaves out what it *is* hiding,
+        // which a focused window never is), or `--include-system` or the mode filter hid
+        // it. Then the first tile is a destination like any other, and starting on it is
+        // what a step away from nothing means.
+        let leads = self.focused.as_deref() == Some(vis[0].key.as_str());
+        let n = vis.len();
+        self.selected = if leads && n > 1 { 1 } else { 0 };
+        self.pending_initial_select = false;
+    }
+
+    /// Draw the tiles from now on.
+    ///
+    /// Under hold-to-switch the first frames are blank on purpose. The surface has to be
+    /// mapped — and so a frame committed — before the compositor will hand over keyboard
+    /// focus, and only once we have that can we tell a held modifier from one released
+    /// before we were listening. Until then the overlay is present but shows nothing, so
+    /// the answer "it was a tap" costs the user no more than a switch.
+    ///
+    /// Called once the answer is in and it wasn't a tap. A tap never calls this: it
+    /// confirms and closes straight out of the blank frames.
+    pub fn reveal(&mut self) {
+        self.revealed = true;
+    }
+
     /// Advance (or retreat) the highlighted source — Tab / Shift+Tab by default.
     pub fn cycle(&mut self, forward: bool) {
         let n = self.visible().len();
@@ -835,6 +900,15 @@ impl App {
         if self.closing {
             return;
         }
+        // A quick tap gets here before the first frame, so the sources may not be in yet
+        // — `pump` runs on the paint path. Closing now would pick nothing at all, so
+        // hold the intent and let the next frame spend it.
+        if self.sources.is_empty() {
+            self.confirm_pending = true;
+            return;
+        }
+        // Normally already applied while painting; without a frame it is still pending.
+        self.apply_initial_select();
         if let Some(sel) = self.visible().get(self.selected).map(|s| s.selection()) {
             self.choose(sel);
         } else {
@@ -942,6 +1016,10 @@ impl App {
 impl App {
     /// GL clear colour: the transparent, dimmed backdrop behind the card (rofi-like).
     pub fn backdrop(&self) -> [f32; 4] {
+        // Blank means blank: the dim would give the overlay away as surely as the tiles.
+        if !self.revealed {
+            return [0.0; 4];
+        }
         let mut c = self.theme.backdrop.to_normalized_gamma_f32();
         // Exposé covers the whole screen: dim almost to opaque so the real windows
         // behind are hidden (a client can't move them; this hides them instead).
@@ -959,25 +1037,13 @@ impl App {
         self.pump(&ctx, importer);
         ctx.request_repaint(); // keep draining the channel while captures stream in
 
-        // Alt-Tab: once sources exist, jump to the next window so releasing Alt
-        // switches immediately (the launching chord counts as the first Tab).
-        if self.pending_initial_select {
-            let vis = self.visible();
-            if !vis.is_empty() {
-                // Only a step away from the focused window is a step at all — so it has
-                // to be on offer, and first, for index 1 to be the window before it.
-                // Focus order does put it first, but it may not be here at all: nothing
-                // was focused, or the scratchpad filter dropped it (`--scratchpad`
-                // leaves out everything the scratchpad is not holding; the plain
-                // switcher leaves out what it *is* hiding, which a focused window never
-                // is), or `--include-system` or the mode filter hid it.
-                // Then the first tile is a destination like any other, and starting on
-                // it is what a step away from nothing means.
-                let leads = self.focused.as_deref() == Some(vis[0].key.as_str());
-                let n = vis.len();
-                self.selected = if leads && n > 1 { 1 } else { 0 };
-                self.pending_initial_select = false;
-            }
+        self.apply_initial_select();
+        // A tap confirms before the first frame is ever painted, and `pump` above is the
+        // only thing that delivers the source list — so a confirm that arrived without
+        // one is spent here, on the frame that finally has it.
+        if self.confirm_pending && !self.sources.is_empty() {
+            self.confirm_pending = false;
+            self.confirm_release();
         }
 
         // Keyboard (read states first; don't call ctx methods inside ctx.input).
@@ -1024,6 +1090,20 @@ impl App {
         }
         if enter && let Some(sel) = self.visible().get(self.selected).map(|s| s.selection()) {
             self.choose(sel);
+        }
+
+        // Everything above runs blank-framed too — the channel drains, keys are read,
+        // a tap can confirm — so only the drawing below waits on the answer.
+        if !self.revealed {
+            let now = ctx.input(|i| i.time);
+            match self.first_frame_at {
+                None => self.first_frame_at = Some(now),
+                Some(first) if now - first >= REVEAL_BACKSTOP => self.reveal(),
+                Some(_) => {}
+            }
+            if !self.revealed {
+                return;
+            }
         }
 
         match self.view {
@@ -1770,6 +1850,163 @@ mod tests {
         }
         assert!(Scratchpad::Only.keeps(true));
         assert!(Scratchpad::Exclude.keeps(false));
+    }
+
+    /// An `App` holding `keys` as its window tiles, with `focused` naming which window
+    /// had the focus (as the startup snapshot would), already armed.
+    fn armed_app(focused: Option<&str>, keys: &[&str]) -> App {
+        let (_tx, rx) = std::sync::mpsc::channel();
+        let opts = Options {
+            mode: Mode::Windows,
+            show_system: false,
+            grid: None,
+            view: View::Strip,
+            hold: true,
+            live: Live::All,
+            scratchpad: Scratchpad::Ignore,
+            cycle: CycleKeys::default(),
+            focus: wlr_capture::focus::FocusOrder {
+                order: keys.iter().map(|k| k.to_string()).collect(),
+                focused: focused.map(String::from),
+            },
+        };
+        let mut app = App::new(
+            rx,
+            Arc::new(Mutex::new(None)),
+            opts,
+            Theme::default(),
+            Arc::new(AtomicBool::new(false)),
+        );
+        app.sources = keys.iter().map(|k| source(k)).collect();
+        app.arm();
+        app
+    }
+
+    fn source(key: &str) -> Source {
+        Source {
+            key: key.to_string(),
+            token: format!("Window: {key}"),
+            title: key.to_string(),
+            subtitle: String::new(),
+            filter: key.to_string(),
+            is_window: true,
+            is_system: false,
+            app_id: key.to_string(),
+            win_title: key.to_string(),
+            dup_index: 0,
+        }
+    }
+
+    fn picked(app: &App) -> Option<String> {
+        app.out
+            .lock()
+            .unwrap()
+            .as_ref()
+            .map(|s| s.identifier.clone())
+    }
+
+    /// `armed_app`, but with hold-to-switch off — the portal picker and the card /
+    /// exposé layouts, where there is no tap to wait out.
+    fn unheld_app() -> App {
+        let mut app = armed_app(Some("a"), &["a", "b"]);
+        let (_tx, rx) = std::sync::mpsc::channel();
+        app.rx = rx;
+        app.hold = false;
+        app.revealed = true;
+        app
+    }
+
+    #[test]
+    fn hold_to_switch_starts_blank_and_invisible() {
+        // The surface must map — and so commit a frame — before the compositor hands
+        // over keyboard focus, so the first frames exist but must give nothing away.
+        let app = armed_app(Some("a"), &["a", "b"]);
+        assert!(!app.revealed);
+        assert_eq!(app.backdrop(), [0.0; 4], "the dim would give it away too");
+    }
+
+    #[test]
+    fn revealing_brings_back_the_themed_backdrop() {
+        let mut app = armed_app(Some("a"), &["a", "b"]);
+        app.reveal();
+        assert!(app.revealed);
+        assert_ne!(app.backdrop(), [0.0; 4]);
+    }
+
+    #[test]
+    fn without_hold_to_switch_nothing_is_held_back() {
+        // No tap to mistake the first frames for, so the picker draws itself at once.
+        let app = unheld_app();
+        assert!(app.revealed);
+        assert_ne!(app.backdrop(), [0.0; 4]);
+    }
+
+    #[test]
+    fn a_tap_confirms_without_ever_revealing() {
+        // The point of the whole arrangement: the switch happens straight out of the
+        // blank frames, so a quick Mod+Tab never flashes a window list on its way past.
+        let mut app = armed_app(Some("a"), &["a", "b", "c"]);
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("b"));
+        assert!(!app.revealed, "a tap must not show the list");
+    }
+
+    #[test]
+    fn tap_confirms_the_window_before_the_focused_one() {
+        // The whole point of the initial advance: a tap switches to the previous window,
+        // not back to the one you are already on.
+        let mut app = armed_app(Some("a"), &["a", "b", "c"]);
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("b"));
+        assert!(app.closing());
+    }
+
+    #[test]
+    fn tap_confirms_the_first_window_when_none_was_focused() {
+        // Nothing focused, so there is no window to step away from and the first tile is
+        // a destination like any other.
+        let mut app = armed_app(None, &["a", "b", "c"]);
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn tap_confirms_the_first_window_when_the_focused_one_is_not_offered() {
+        // `--scratchpad` and friends can drop the focused window from the list; index 1
+        // would then skip a window rather than land on the previous one.
+        let mut app = armed_app(Some("z"), &["a", "b", "c"]);
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("a"));
+    }
+
+    #[test]
+    fn tap_before_the_sources_arrive_waits_rather_than_picking_nothing() {
+        // A tap can beat the capture thread's first message. `pump` only runs while
+        // painting, so closing here would confirm an empty list and switch to nothing.
+        let mut app = armed_app(Some("a"), &["a", "b"]);
+        app.sources.clear();
+        app.confirm_release();
+        assert!(!app.closing(), "must not close without a selection");
+        assert_eq!(picked(&app), None);
+        assert!(app.confirm_pending);
+
+        // The frame that finally carries the sources spends the held intent.
+        app.sources = ["a", "b"].iter().map(|k| source(k)).collect();
+        app.confirm_pending = false;
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_real_cycle_supersedes_the_pending_advance() {
+        // Tab before the confirm: the launching chord's stand-in gives way to the real
+        // press, and the tap confirms where the user actually cycled to.
+        let mut app = armed_app(Some("a"), &["a", "b", "c"]);
+        app.cycle(true);
+        app.confirm_release();
+        assert_eq!(picked(&app).as_deref(), Some("b"));
+        app.closing = false;
+        assert!(!app.pending_initial_select);
     }
 
     #[test]
