@@ -39,8 +39,10 @@ wayland-protocols-wlr.workspace = true
 rustix.workspace = true
 # Zero-copy GPU capture (the `gpu` feature): allocate dma-bufs via gbm.
 gbm = { workspace = true, optional = true }
-# Compositor IPC for focus-aware capture (the `focus` feature).
+# Compositor IPC for focus-aware capture (the `focus` feature). serde_json parses the
+# `hyprctl` / `niri msg` replies; sway is spoken natively over its socket by swayipc.
 serde_json = { workspace = true, optional = true }
+swayipc = { workspace = true, optional = true }
 # Windowing host for the shared frozen overlay (the `overlay` feature).
 smithay-client-toolkit = { workspace = true, optional = true }
 # Native FFmpeg bindings for video encoding (the `video` feature).
@@ -76,7 +78,7 @@ gpu = ["dep:gbm"]
 compose = ["dep:image"]
 # Focus-aware capture (`focus`): query the compositor's IPC for the active window /
 # current output. Pulls `serde_json` to parse it.
-focus = ["dep:serde_json"]
+focus = ["dep:serde_json", "dep:swayipc"]
 # The shared frozen-screen overlay (`overlay`): a layer-shell surface per output
 # rendering a frozen capture for interactive region/point selection. Needs the
 # toolkit (egui rendering), compose (OutputCapture) and a windowing host (sctk).

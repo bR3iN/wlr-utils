@@ -8,7 +8,7 @@
 //! For the xdg-desktop-portal-wlr picker (prints to stdout), see `wlr-chooser`.
 
 use crate::keys::{self, CycleKeys};
-use crate::ui::{self, Live, Mode, Options, View};
+use crate::ui::{self, Live, Mode, Options, Scratchpad, View};
 use crate::{acquire_switch_lock, run_overlay};
 use crate::{i18n, tr};
 use clap::{Parser, ValueEnum};
@@ -89,8 +89,11 @@ struct Cli {
     #[arg(long)]
     include_system: bool,
     /// Switch only between the windows in sway's scratchpad (sway-only; needs
-    /// SWAYSOCK). Includes scratchpad windows that are currently shown. Opens on
-    /// the first window rather than the second (no Alt-Tab-style initial advance).
+    /// SWAYSOCK) — the ones it is hiding, which the plain switcher leaves out, and
+    /// the ones it has up, which the plain switcher offers too. Doubles as sway's
+    /// own toggle: with a scratchpad window already on screen, the key puts that
+    /// one back and stops. Otherwise it opens on the first window rather than the
+    /// second (no Alt-Tab-style initial advance).
     #[arg(long)]
     scratchpad: bool,
     /// Report which capture protocols the current compositor supports, then exit.
@@ -100,8 +103,8 @@ struct Cli {
 
 /// What the switcher has to offer, resolved before the overlay is raised.
 enum Candidates {
-    /// `--scratchpad` was asked for but sway's IPC didn't answer (no `SWAYSOCK`, no
-    /// `swaymsg`, not sway), so the filter can't be evaluated at all.
+    /// `--scratchpad` was asked for but sway's IPC didn't answer (no `SWAYSOCK`, not
+    /// sway), so the filter can't be evaluated at all.
     Unavailable,
     /// No windows to switch between: do nothing rather than raise an overlay with no
     /// tiles in it.
@@ -117,22 +120,18 @@ enum Candidates {
 /// whether an overlay is worth raising over what came out.
 ///
 /// Applies the same filters [`ui::App::visible`] would, so the count here matches the
-/// tiles the user would have seen — `--scratchpad`, plus the app-id-less "system"
+/// tiles the user would have seen — the scratchpad side, plus the app-id-less "system"
 /// windows that stay hidden without `--include-system`. (Mode and the search box need
 /// no handling: the switcher is always [`Mode::Windows`], and the filter starts empty.)
 fn resolve_candidates(
     toplevels: &[wlr_capture::wl::Toplevel],
-    scratchpad: bool,
+    scratchpad: Scratchpad,
     show_system: bool,
     mru: &[String],
 ) -> Candidates {
-    let windows = if scratchpad {
-        match ui::scratchpad_windows(toplevels, mru) {
-            Some(w) => w,
-            None => return Candidates::Unavailable,
-        }
-    } else {
-        ui::ordered_windows(toplevels, mru)
+    let windows = match ui::window_list(toplevels, mru, scratchpad) {
+        Some(w) => w,
+        None => return Candidates::Unavailable,
     };
     let windows: Vec<_> = windows
         .into_iter()
@@ -178,6 +177,27 @@ pub fn main() {
         None => return,
     };
 
+    // `--scratchpad` covers both halves of sway's `scratchpad show`: with a scratchpad
+    // window already on screen the key means "put it away" — hide it, raise nothing —
+    // and only once none is showing does the same key offer the list. Checked before
+    // the Wayland client is even built, since this path needs none of it.
+    if cli.scratchpad
+        && let Some(con_id) = wlr_capture::focus::sway_shown_scratchpad()
+    {
+        if wlr_capture::focus::sway_hide_scratchpad(con_id) {
+            return;
+        }
+        // Sway refused — the container went away under us, near enough. Say so and fall
+        // through to the overlay rather than leaving the keypress with nothing to show.
+        eprintln!(
+            "{}",
+            tr!(
+                "error",
+                error = "could not hide the shown scratchpad window"
+            )
+        );
+    }
+
     let view = match cli.layout {
         LayoutArg::Strip => View::Strip,
         LayoutArg::Grid => View::Grid,
@@ -199,7 +219,13 @@ pub fn main() {
         view,
         hold,
         live: cli.live.into(),
-        scratchpad: cli.scratchpad,
+        // The two halves of one keybinding: `--scratchpad` switches within what has
+        // been put away, and the plain switcher within what has not.
+        scratchpad: if cli.scratchpad {
+            Scratchpad::Only
+        } else {
+            Scratchpad::Exclude
+        },
         cycle: CycleKeys {
             next: cli.cycle_next,
             prev: cli.cycle_prev,
@@ -224,7 +250,7 @@ pub fn main() {
         }
         Ok(client) => resolve_candidates(
             client.toplevels(),
-            cli.scratchpad,
+            opts.scratchpad,
             cli.include_system,
             &opts.focus.order,
         ),

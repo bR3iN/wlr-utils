@@ -8,7 +8,7 @@
 //! `wlr-switcher` binary.
 
 use crate::keys::CycleKeys;
-use crate::ui::{self, Live, Mode, Options, View};
+use crate::ui::{self, Live, Mode, Options, Scratchpad, View};
 use crate::{i18n, tr};
 use crate::{parse_grid, run_overlay};
 use clap::Parser;
@@ -88,7 +88,7 @@ pub fn main() {
         live: Live::All,
         // Scratchpad filtering is a wlr-switcher feature; the portal picker offers
         // monitors too, where "the windows in the scratchpad" means little.
-        scratchpad: false,
+        scratchpad: Scratchpad::Ignore,
         // Rebindable cycling is a wlr-switcher feature too: the picker is a card with
         // a search field, where Tab belongs to the field rather than to navigation.
         cycle: CycleKeys::default(),

@@ -222,16 +222,72 @@ fn order_key(
     )
 }
 
-/// The windows in sway's scratchpad, as [`ordered_windows`] would list them.
-/// `None` if sway's IPC can't be reached.
-pub fn scratchpad_windows(
+/// What the window list does with sway's scratchpad.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Scratchpad {
+    /// Stay out of it: every window is offered, put away or not. What the portal picker
+    /// does — a screen-share source list has no reason to care where a window lives.
+    Ignore,
+    /// Only the windows the scratchpad holds (`wlr-switcher --scratchpad`).
+    Only,
+    /// Every window the scratchpad is *hiding* is left out (plain `wlr-switcher`): one
+    /// put away is one the user has hidden, so Alt-Tab stepping over it is the point —
+    /// it comes back by its own binding, not by turning up in the strip. A scratchpad
+    /// window that is *up* on a workspace stays in: it is on screen like any other, and
+    /// switching away from it — or back to it — is ordinary switching.
+    Exclude,
+}
+
+impl Scratchpad {
+    /// The windows this mode sorts by, as sway names them: everything the scratchpad
+    /// owns under [`Only`](Scratchpad::Only) — shown ones included, since they are still
+    /// in it — and only what it is currently hiding under
+    /// [`Exclude`](Scratchpad::Exclude).
+    ///
+    /// `None` when sway can't be asked, and always for [`Ignore`](Scratchpad::Ignore),
+    /// which has no reason to ask; callers settle what that means for them.
+    fn ids(self) -> Option<HashSet<String>> {
+        match self {
+            Scratchpad::Ignore => None,
+            Scratchpad::Only => wlr_capture::focus::sway_scratchpad_ids(),
+            Scratchpad::Exclude => wlr_capture::focus::sway_hidden_scratchpad_ids(),
+        }
+    }
+
+    /// Whether a window is offered, given whether [`Scratchpad::ids`] named it.
+    fn keeps(self, named: bool) -> bool {
+        match self {
+            Scratchpad::Ignore => true,
+            Scratchpad::Only => named,
+            Scratchpad::Exclude => !named,
+        }
+    }
+}
+
+/// The windows the overlay offers, as [`ordered_windows`] would list them, with
+/// `scratchpad` deciding which side of sway's scratchpad they have to be on.
+///
+/// `None` only under [`Scratchpad::Only`] with sway's IPC out of reach: the filter can't
+/// be evaluated, and "the windows in the scratchpad" has no answer to fall back on.
+/// [`Scratchpad::Exclude`] degrades to the unfiltered list instead — a compositor that
+/// isn't sway hides nothing in a scratchpad, which is exactly the list it already is.
+pub fn window_list(
     toplevels: &[wl::Toplevel],
     mru: &[String],
+    scratchpad: Scratchpad,
 ) -> Option<Vec<(wl::Toplevel, usize)>> {
-    let scratch = wlr_capture::focus::sway_scratchpad_ids()?;
     let mut windows = ordered_windows(toplevels, mru);
-    windows.retain(|(w, _)| scratch.contains(&w.identifier));
-    Some(windows)
+    if scratchpad == Scratchpad::Ignore {
+        return Some(windows);
+    }
+    match scratchpad.ids() {
+        Some(ids) => {
+            windows.retain(|(w, _)| scratchpad.keeps(ids.contains(&w.identifier)));
+            Some(windows)
+        }
+        None if scratchpad == Scratchpad::Exclude => Some(windows),
+        None => None,
+    }
 }
 
 /// A source paired with what it takes to (re)open its capture session.
@@ -253,8 +309,8 @@ enum Capturable {
 /// the overlay went up — never re-queried, so the list can't reshuffle under the user
 /// mid-switch.
 ///
-/// With `scratchpad`, only the windows in sway's scratchpad are offered. The filter
-/// is applied *here* rather than in [`App::visible`] so we never open a capture
+/// `scratchpad` keeps the scratchpad's windows or drops them (see [`Scratchpad`]). The
+/// filter is applied *here* rather than in [`App::visible`] so we never open a capture
 /// session (and dma-buf) for a window that will never be shown.
 // SessionId (a wayland ObjectId) is used as a map key: its interior-mutable
 // "alive" flag is not part of Hash/Eq, so it is a sound key.
@@ -262,7 +318,7 @@ enum Capturable {
 pub fn capture_thread(
     tx: Sender<Msg>,
     gpu_failed: Arc<AtomicBool>,
-    scratchpad: bool,
+    scratchpad: Scratchpad,
     mru: Vec<String>,
 ) {
     let mut client = match wl::Client::connect() {
@@ -278,9 +334,11 @@ pub fn capture_thread(
     let mut by_id: HashMap<wl::SessionId, String> = HashMap::new(); // reverse, to label frames
     let mut iconed: HashSet<String> = HashSet::new();
     let mut last_keys: Vec<String> = Vec::new();
-    // `--scratchpad`: the scratchpad member set, and the unfiltered toplevel list it
-    // was queried for. Each query forks `swaymsg`, far too costly to repeat every
-    // round, so we re-ask only when a window actually appears or disappears.
+    // The scratchpad member set, and the unfiltered toplevel list it was queried for.
+    // Each query is a round trip to sway plus a parse of the whole tree, too costly to
+    // repeat every round, so we re-ask only when a window actually appears or
+    // disappears. Empty until then, which for [`Scratchpad::Exclude`] means the list
+    // starts unfiltered — the safe way round, since off sway nothing is hidden away.
     let mut scratch: HashSet<String> = HashSet::new();
     let mut scratch_for: Vec<String> = Vec::new();
     let budget = round_budget();
@@ -295,20 +353,20 @@ pub fn capture_thread(
         // outputs first (sorted by name), then windows (most recently focused first).
         let mut outputs = client.outputs().to_vec();
         outputs.sort_by(|a, b| a.name.cmp(&b.name));
-        // Numbered over *every* window, before `--scratchpad` drops any: see
+        // Numbered over *every* window, before the scratchpad filter drops any: see
         // [`ordered_windows`] for why a filtered subset would mis-number.
         let mut windows = ordered_windows(client.toplevels(), &mru);
-        if scratchpad {
+        if scratchpad != Scratchpad::Ignore {
             let ids: Vec<String> = windows.iter().map(|(w, _)| w.identifier.clone()).collect();
             if ids != scratch_for {
                 scratch_for = ids;
-                // Keep the last known set if the query fails (sway gone, swaymsg
-                // missing): better a stale filter than silently emptying the picker.
-                if let Some(s) = wlr_capture::focus::sway_scratchpad_ids() {
+                // Keep the last known set if the query fails (sway gone, socket
+                // closed): better a stale filter than silently emptying the picker.
+                if let Some(s) = scratchpad.ids() {
                     scratch = s;
                 }
             }
-            windows.retain(|(w, _)| scratch.contains(&w.identifier));
+            windows.retain(|(w, _)| scratchpad.keeps(scratch.contains(&w.identifier)));
         }
 
         let mut current: Vec<(Source, Capturable)> = Vec::new();
@@ -617,10 +675,10 @@ pub struct Options {
     pub hold: bool,
     /// Which Alt-Tab tiles show a live preview (vs. just the icon).
     pub live: Live,
-    /// Offer only the windows in sway's scratchpad. Sway-only (see
-    /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids)) and
-    /// wlr-switcher-only; the portal picker always leaves this off.
-    pub scratchpad: bool,
+    /// Which side of sway's scratchpad the offered windows are on. Sway-only (see
+    /// [`focus::sway_scratchpad_ids`](wlr_capture::focus::sway_scratchpad_ids)); the
+    /// portal picker always [ignores](Scratchpad::Ignore) it.
+    pub scratchpad: Scratchpad,
     /// Keys that cycle the highlight. `Tab` / `Shift+Tab` unless wlr-switcher was
     /// pointed elsewhere by the environment (see [`crate::keys`]).
     pub cycle: CycleKeys,
@@ -665,9 +723,6 @@ pub struct App {
     /// Set once the host confirms Alt was held at startup; enables Tab-cycle and
     /// confirm-on-Alt-release. Stays false (classic picker) if Alt is never seen.
     armed: bool,
-    /// Whether arming counts the launching chord as a first cycle (see
-    /// [`App::arm`]). Off under `--scratchpad`, and off when nothing was focused.
-    advance_on_arm: bool,
     /// The window focused when the snapshot was taken, if one was: the tile the initial
     /// advance cycles *away* from, so it has to be the one under the highlight for that
     /// advance to mean anything.
@@ -711,11 +766,6 @@ impl App {
             live: opts.live,
             cycle: opts.cycle,
             armed: false,
-            // The initial advance is Alt-Tab's own convention, and it only makes sense
-            // as a step away from the window you were on: with nothing focused there is
-            // no such window, and the first tile is a destination like any other.
-            // Picking out of the scratchpad starts on the first window too.
-            advance_on_arm: !opts.scratchpad && opts.focus.focused.is_some(),
             focused: opts.focus.focused.clone(),
             pending_initial_select: false,
             focus_filter: true,
@@ -751,13 +801,15 @@ impl App {
     /// confirm-on-release, and arm the initial MRU-ish jump.
     ///
     /// The jump treats the launching chord as a first cycle — right for `Mod1+Tab`,
-    /// whose `Tab` the compositor swallows before we hold focus, so it can never
-    /// reach us. Skipped under `--scratchpad`, which opens on the first window, and
-    /// skipped when no window was focused to cycle away from.
+    /// whose `Tab` the compositor swallows before we hold focus, so it can never reach
+    /// us. Whether it comes to anything is settled later, in [`App::run_ui`]: a step
+    /// away from the focused window is a step only while that window is one of the tiles
+    /// on offer, which is a question about the filtered list and so can't be answered
+    /// until the list is in.
     pub fn arm(&mut self) {
         if !self.armed {
             self.armed = true;
-            self.pending_initial_select = self.advance_on_arm;
+            self.pending_initial_select = true;
         }
     }
 
@@ -912,10 +964,15 @@ impl App {
         if self.pending_initial_select {
             let vis = self.visible();
             if !vis.is_empty() {
-                // Only a step away from the focused window is a step at all. Focus order
-                // puts that window first, but a tile hidden by `--include-system` or by
-                // the mode filter could have displaced it — and then index 1 would skip
-                // a window rather than land on the previous one.
+                // Only a step away from the focused window is a step at all — so it has
+                // to be on offer, and first, for index 1 to be the window before it.
+                // Focus order does put it first, but it may not be here at all: nothing
+                // was focused, or the scratchpad filter dropped it (`--scratchpad`
+                // leaves out everything the scratchpad is not holding; the plain
+                // switcher leaves out what it *is* hiding, which a focused window never
+                // is), or `--include-system` or the mode filter hid it.
+                // Then the first tile is a destination like any other, and starting on
+                // it is what a step away from nothing means.
                 let leads = self.focused.as_deref() == Some(vis[0].key.as_str());
                 let n = vis.len();
                 self.selected = if leads && n > 1 { 1 } else { 0 };
@@ -1695,6 +1752,24 @@ mod tests {
         let mut w = windows.to_vec();
         w.sort_by_key(|(id, app_id, title)| order_key(&rank, id, app_id, title));
         w.into_iter().map(|(id, _, _)| id.to_string()).collect()
+    }
+
+    #[test]
+    fn scratchpad_modes_keep_opposite_halves_of_what_they_are_told() {
+        // Each mode is handed the set it asked sway for — everything the scratchpad owns
+        // for `Only`, only what it is hiding for `Exclude` — and keeps opposite halves
+        // of it. A window shown from the scratchpad is named by the first set and not by
+        // the second, so both switchers offer it: it is in the scratchpad *and* on
+        // screen.
+        for named in [true, false] {
+            assert!(Scratchpad::Ignore.keeps(named));
+            assert_ne!(
+                Scratchpad::Only.keeps(named),
+                Scratchpad::Exclude.keeps(named)
+            );
+        }
+        assert!(Scratchpad::Only.keeps(true));
+        assert!(Scratchpad::Exclude.keeps(false));
     }
 
     #[test]

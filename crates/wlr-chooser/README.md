@@ -186,6 +186,36 @@ says, `Shift` or not. Arrow keys always navigate as well. In the `card` layout
 the cycle keys apply only while a launch modifier is held; otherwise `Tab`
 belongs to the search field.
 
+### Sway scratchpad
+
+On sway, the switcher leaves out the windows the scratchpad is *hiding*: one you
+have put away is one you have hidden, so Alt-Tab steps over it. One you have
+brought up stays in the list — it is on screen like any other window.
+`--scratchpad` is the other half: it narrows the switcher to the scratchpad's own
+windows, hidden and shown alike, and doubles as sway's `scratchpad show` toggle:
+
+```
+bindsym $mod+minus exec wlr-switcher --scratchpad
+```
+
+- **Nothing from the scratchpad on screen** — the overlay opens on the scratchpad
+  windows (on the first one, not the second); pick one and it comes up.
+- **A scratchpad window already on screen** — that window goes straight back into
+  the scratchpad and nothing else happens: no overlay, and the focus stays where
+  it is. A whole container that was sent to the scratchpad goes back as a whole,
+  exactly as sway moves it.
+
+"On screen" means the workspace you are on — a scratchpad window shown on another
+output is left where it is. Sway-only, both halves: without sway's IPC
+(`SWAYSOCK`) there is no scratchpad to sort windows by, and the switcher offers
+every window.
+
+The Alt-Tab initial advance follows from that and needs no rule of its own: it
+steps away from the focused window when that window is one of the tiles on offer
+— including a scratchpad window you have up, which the plain switcher lists — and
+starts on the first tile when it is not, as under `--scratchpad`, where whatever
+holds the focus is by definition not in the list.
+
 > **Tip:** set `WLR_CHOOSER_TIMING=1` to print cold-start timing milestones to
 > stderr if you want to profile how fast the overlay appears.
 
