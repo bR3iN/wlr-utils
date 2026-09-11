@@ -62,7 +62,7 @@ use wayland_protocols::wp::tablet::zv2::client::{
     zwp_tablet_pad_v2::{self, ZwpTabletPadV2},
     zwp_tablet_seat_v2::{self, ZwpTabletSeatV2},
     zwp_tablet_tool_v2::{self, ZwpTabletToolV2},
-    zwp_tablet_v2::ZwpTabletV2,
+    zwp_tablet_v2::{self, ZwpTabletV2},
 };
 use wlr_capture::render::Gpu;
 use wlr_capture::theme::Theme;
@@ -236,6 +236,41 @@ struct TabletTool {
     /// Last known surface-local position, since `down`/`up` carry no coordinates of
     /// their own.
     last_pos: Option<(f64, f64)>,
+    /// A `down` arrived before any position was known (the tool entered the input
+    /// region already in contact), so the press waits for the next `motion`.
+    pending_press: bool,
+}
+
+/// A `zwp_tablet_pad_v2` and the child objects it announced. wlr-draw ignores pad input,
+/// but the protocol requires the client to destroy every child when the pad is removed.
+struct TabletPad {
+    proxy: ZwpTabletPadV2,
+    groups: Vec<ZwpTabletPadGroupV2>,
+    controls: Vec<PadControl>,
+}
+
+/// A ring, strip or dial offered by one of a pad's groups.
+enum PadControl {
+    Ring(ZwpTabletPadRingV2),
+    Strip(ZwpTabletPadStripV2),
+    Dial(ZwpTabletPadDialV2),
+}
+
+impl TabletPad {
+    /// Destroy the controls, then the groups, then the pad itself.
+    fn destroy(self) {
+        for control in self.controls {
+            match control {
+                PadControl::Ring(r) => r.destroy(),
+                PadControl::Strip(s) => s.destroy(),
+                PadControl::Dial(d) => d.destroy(),
+            }
+        }
+        for group in self.groups {
+            group.destroy();
+        }
+        self.proxy.destroy();
+    }
 }
 
 /// An immutable view of the drawing state handed to each surface's painter.
@@ -284,12 +319,13 @@ struct State {
     /// `zwp_tablet_manager_v2`, if the compositor advertises tablet support. Stylus
     /// input is optional — everything else works unchanged without it.
     tablet_manager: Option<ZwpTabletManagerV2>,
-    /// One tablet seat per `wl_seat` present at startup, kept alive so the compositor
-    /// keeps sending tool/tablet/pad events on them. Requested in `run()`, the same
-    /// place output surfaces are built for the outputs present at startup.
-    tablet_seat: Vec<ZwpTabletSeatV2>,
+    /// The tablet seat bound for each `wl_seat`, kept alive so the compositor keeps
+    /// sending tool/tablet/pad events on it, and destroyed when its seat goes away.
+    tablet_seats: Vec<(wl_seat::WlSeat, ZwpTabletSeatV2)>,
     /// Live per-tool tablet state (typically 1-2 entries: pen and/or eraser end).
     tablet_tools: Vec<TabletTool>,
+    /// Tablet pads, tracked only so their objects can be destroyed on removal.
+    tablet_pads: Vec<TabletPad>,
     /// Calloop handle, needed to wire up keyboard repeat when the seat appears.
     loop_handle: LoopHandle<'static, State>,
     surfaces: Vec<Surface>,
@@ -416,6 +452,20 @@ impl State {
             .iter()
             .find(|s| s.layer.wl_surface() == surface)
             .map(|s| (s.logical_x as f64 + pos.0, s.logical_y as f64 + pos.1))
+    }
+
+    /// Request the tablet seat for `seat`, if the compositor supports tablets. Used both
+    /// at startup and on hotplug (`new_seat`); idempotent like `add_output_surface`, so a
+    /// seat seen by both can't be bound twice.
+    fn bind_tablet_seat(&mut self, seat: wl_seat::WlSeat, qh: &QueueHandle<State>) {
+        let Some(mgr) = &self.tablet_manager else {
+            return;
+        };
+        if self.tablet_seats.iter().any(|(s, _)| *s == seat) {
+            return;
+        }
+        let tablet_seat = mgr.get_tablet_seat(&seat, qh, ());
+        self.tablet_seats.push((seat, tablet_seat));
     }
 
     /// Build the click-through overlay surface for one output and track it. Used both at
@@ -1268,8 +1318,9 @@ pub fn run() -> anyhow::Result<()> {
         keyboard: None,
         pointer: None,
         tablet_manager,
-        tablet_seat: Vec::new(),
+        tablet_seats: Vec::new(),
         tablet_tools: Vec::new(),
+        tablet_pads: Vec::new(),
         loop_handle: lh.clone(),
         surfaces: Vec::new(),
         compositor,
@@ -1331,11 +1382,9 @@ pub fn run() -> anyhow::Result<()> {
     // Likewise, request the tablet seat for each `wl_seat` present at startup: SCTK's
     // `SeatState` binds those seats directly in its constructor, before `new_seat`
     // exists to be called, so hooking a capability handler would miss them.
-    if let Some(mgr) = &state.tablet_manager {
-        let seats: Vec<_> = state.seat_state.seats().collect();
-        for seat in seats {
-            state.tablet_seat.push(mgr.get_tablet_seat(&seat, &qh, ()));
-        }
+    let seats: Vec<_> = state.seat_state.seats().collect();
+    for seat in seats {
+        state.bind_tablet_seat(seat, &qh);
     }
     event_queue.roundtrip(&mut state)?;
 
@@ -2395,9 +2444,7 @@ impl SeatHandler for State {
     }
     fn new_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
         // Startup seats are bound in `run()`; this only covers one hotplugged later.
-        if let Some(mgr) = &self.tablet_manager {
-            self.tablet_seat.push(mgr.get_tablet_seat(&seat, qh, ()));
-        }
+        self.bind_tablet_seat(seat, qh);
     }
     fn new_capability(
         &mut self,
@@ -2434,7 +2481,12 @@ impl SeatHandler for State {
         _: Capability,
     ) {
     }
-    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn remove_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        if let Some(i) = self.tablet_seats.iter().position(|(s, _)| *s == seat) {
+            let (_, tablet_seat) = self.tablet_seats.remove(i);
+            tablet_seat.destroy();
+        }
+    }
 }
 
 impl KeyboardHandler for State {
@@ -2656,8 +2708,8 @@ impl PointerHandler for State {
 // `wlr-capture`'s `wl.rs` for `zwlr_foreign_toplevel_manager_v1`. Basic support only:
 // tip contact and motion drive the same `on_press`/`on_motion`/`on_release` pipeline
 // the mouse uses; pressure/tilt/distance and stylus barrel buttons are out of scope
-// and left as no-ops. The tablet pad (express keys/rings/strips) is irrelevant to this
-// app — bound only enough to satisfy the protocol's child-object lifecycle.
+// and left as no-ops. The tablet pad (express keys, rings, strips, dials) is irrelevant
+// to this app: its objects are tracked only to destroy them when the pad is removed.
 
 impl Dispatch<ZwpTabletSeatV2, ()> for State {
     fn event(
@@ -2669,18 +2721,24 @@ impl Dispatch<ZwpTabletSeatV2, ()> for State {
         _: &QueueHandle<Self>,
     ) {
         use zwp_tablet_seat_v2::Event;
-        if let Event::ToolAdded { id } = event {
-            state.tablet_tools.push(TabletTool {
+        match event {
+            Event::ToolAdded { id } => state.tablet_tools.push(TabletTool {
                 proxy: id,
                 kind: None,
                 surface: None,
                 saved_tool: None,
                 last_pos: None,
-            });
+                pending_press: false,
+            }),
+            Event::PadAdded { id } => state.tablet_pads.push(TabletPad {
+                proxy: id,
+                groups: Vec::new(),
+                controls: Vec::new(),
+            }),
+            // The tablet's identity (name/vid/pid/path) doesn't matter for
+            // stylus-as-pointer support; its object only needs destroying on removal.
+            _ => {}
         }
-        // TabletAdded (tablet identity: name/vid/pid/path) and PadAdded (express keys,
-        // rings, strips) are bound below purely to satisfy the object lifecycle, then
-        // ignored — neither matters for stylus-as-pointer support.
     }
 
     event_created_child!(State, ZwpTabletSeatV2, [
@@ -2696,6 +2754,23 @@ impl Dispatch<ZwpTabletSeatV2, ()> for State {
 /// never to `last_pos` directly, or it gets the surface offset applied twice.
 fn tablet_tool_global(state: &State, t: &TabletTool) -> Option<(f64, f64)> {
     state.to_global(t.surface.as_ref()?, t.last_pos?)
+}
+
+/// Press the tool's tip where it is: the colour popup eats the tap (pick a swatch /
+/// dismiss) instead of starting a stroke, same as a mouse click. Returns `false` when
+/// the position isn't known yet, so the caller can defer the press to the next `motion`.
+fn tablet_press(state: &mut State, idx: usize) -> bool {
+    let t = &state.tablet_tools[idx];
+    let (Some(surface), Some(pos)) = (t.surface.clone(), t.last_pos) else {
+        return false;
+    };
+    if state.show_palette {
+        state.palette_click(&surface, pos);
+    } else if let Some(g) = state.to_global(&surface, pos) {
+        state.pointer_pos = Some(g);
+        state.on_press((g.0 as f32, g.1 as f32));
+    }
+    true
 }
 
 impl Dispatch<ZwpTabletToolV2, ()> for State {
@@ -2736,6 +2811,7 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
                 let t = &mut state.tablet_tools[idx];
                 t.surface = None;
                 t.last_pos = None;
+                t.pending_press = false;
                 // Mirror the pointer's `Leave`: nothing is hovering any more, so the
                 // flashlight circle and do_save shouldn't keep using a stale position.
                 state.pointer_pos = None;
@@ -2743,6 +2819,10 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
             }
             Event::Motion { x, y } => {
                 state.tablet_tools[idx].last_pos = Some((x, y));
+                if std::mem::take(&mut state.tablet_tools[idx].pending_press) {
+                    tablet_press(state, idx);
+                    return;
+                }
                 // Update on every hover motion, not just while the tip is down — same as
                 // the pointer's Motion, which drives the flashlight circle and do_save
                 // even when no button/gesture is active.
@@ -2756,26 +2836,15 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
                 }
             }
             Event::Down { .. } => {
-                // The colour popup eats the tap (pick a swatch / dismiss) instead of
-                // starting a stroke, same as a mouse click.
-                if state.show_palette {
-                    let surface = state.tablet_tools[idx].surface.clone();
-                    let pos = state.tablet_tools[idx].last_pos;
-                    if let Some(surface) = surface
-                        && let Some(pos) = pos
-                    {
-                        state.palette_click(&surface, pos);
-                    }
-                } else if let Some(g) =
-                    tablet_tool_global(state, &state.tablet_tools[idx]).or(state.pointer_pos)
-                {
-                    state.pointer_pos = Some(g);
-                    state.on_press((g.0 as f32, g.1 as f32));
-                }
+                // A tool entering the input region already in contact gets `down` before
+                // any `motion`: press at the first known position rather than guess one.
+                state.tablet_tools[idx].pending_press = !tablet_press(state, idx);
             }
             Event::Up => {
-                if let Some(g) =
-                    tablet_tool_global(state, &state.tablet_tools[idx]).or(state.pointer_pos)
+                // A press still waiting for a position never started a gesture to end.
+                if !std::mem::take(&mut state.tablet_tools[idx].pending_press)
+                    && let Some(g) =
+                        tablet_tool_global(state, &state.tablet_tools[idx]).or(state.pointer_pos)
                 {
                     state.on_release((g.0 as f32, g.1 as f32));
                 }
@@ -2795,15 +2864,42 @@ impl Dispatch<ZwpTabletToolV2, ()> for State {
     }
 }
 
-impl Dispatch<ZwpTabletPadV2, ()> for State {
+impl Dispatch<ZwpTabletV2, ()> for State {
     fn event(
         _: &mut Self,
-        _: &ZwpTabletPadV2,
-        _: zwp_tablet_pad_v2::Event,
+        proxy: &ZwpTabletV2,
+        event: zwp_tablet_v2::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        // The protocol requires the client to destroy a removed tablet.
+        if let zwp_tablet_v2::Event::Removed = event {
+            proxy.destroy();
+        }
+    }
+}
+
+impl Dispatch<ZwpTabletPadV2, ()> for State {
+    fn event(
+        state: &mut Self,
+        proxy: &ZwpTabletPadV2,
+        event: zwp_tablet_pad_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_tablet_pad_v2::Event;
+        let Some(idx) = state.tablet_pads.iter().position(|p| &p.proxy == proxy) else {
+            return;
+        };
+        match event {
+            Event::Group { pad_group } => state.tablet_pads[idx].groups.push(pad_group),
+            // The protocol requires the client to destroy the pad's groups, rings,
+            // strips and dials along with the pad itself.
+            Event::Removed => state.tablet_pads.remove(idx).destroy(),
+            _ => {}
+        }
     }
 
     event_created_child!(State, ZwpTabletPadV2, [
@@ -2813,13 +2909,27 @@ impl Dispatch<ZwpTabletPadV2, ()> for State {
 
 impl Dispatch<ZwpTabletPadGroupV2, ()> for State {
     fn event(
-        _: &mut Self,
-        _: &ZwpTabletPadGroupV2,
-        _: zwp_tablet_pad_group_v2::Event,
+        state: &mut Self,
+        proxy: &ZwpTabletPadGroupV2,
+        event: zwp_tablet_pad_group_v2::Event,
         _: &(),
         _: &Connection,
         _: &QueueHandle<Self>,
     ) {
+        use zwp_tablet_pad_group_v2::Event;
+        let control = match event {
+            Event::Ring { ring } => PadControl::Ring(ring),
+            Event::Strip { strip } => PadControl::Strip(strip),
+            Event::Dial { dial } => PadControl::Dial(dial),
+            _ => return,
+        };
+        if let Some(pad) = state
+            .tablet_pads
+            .iter_mut()
+            .find(|p| p.groups.contains(proxy))
+        {
+            pad.controls.push(control);
+        }
     }
 
     event_created_child!(State, ZwpTabletPadGroupV2, [
@@ -2830,7 +2940,6 @@ impl Dispatch<ZwpTabletPadGroupV2, ()> for State {
 }
 
 delegate_noop!(State: ignore ZwpTabletManagerV2);
-delegate_noop!(State: ignore ZwpTabletV2);
 delegate_noop!(State: ignore ZwpTabletPadRingV2);
 delegate_noop!(State: ignore ZwpTabletPadStripV2);
 delegate_noop!(State: ignore ZwpTabletPadDialV2);
