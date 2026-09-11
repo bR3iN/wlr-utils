@@ -44,6 +44,7 @@ use smithay_client_toolkit::{
         },
     },
 };
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 use wayland_client::{
     Connection, Dispatch, QueueHandle, delegate_noop, event_created_child,
@@ -2267,58 +2268,76 @@ fn paint_help(p: &egui::Painter, _ui: &egui::Ui, frame: &Frame) {
     let key_font = egui::FontId::monospace(13.0);
     let desc_font = egui::FontId::proportional(13.0);
     let group_font = egui::FontId::proportional(12.0);
+    let key_color = egui::Color32::from_white_alpha(230);
     let line_h = 19.0;
     let group_gap = 8.0; // extra space above each section header
-    let key_col = 60.0; // width reserved for the key column
+    let key_indent = 10.0; // keys sit a little right of their section header
+    let col_gap = 14.0; // between the widest key and the descriptions
+    let pad = 12.0;
     let origin = egui::pos2(28.0, 28.0);
-    let content_h: f32 = rows
-        .iter()
-        .map(|r| match r {
-            HelpRow::Group(_) => line_h + group_gap,
-            HelpRow::Entry(..) => line_h,
-        })
-        .sum();
-    let panel = egui::Rect::from_min_size(
-        origin - egui::vec2(12.0, 12.0),
-        egui::vec2(key_col + 280.0, content_h + 40.0),
-    );
-    p.rect_filled(panel, 10.0, egui::Color32::from_black_alpha(220));
-    p.text(
-        origin,
-        egui::Align2::LEFT_TOP,
+
+    // Lay every cell out first: key labels are translated and rebindable, so the key
+    // column is sized to the widest one rather than a fixed width they could overflow.
+    enum Line {
+        Group(Arc<egui::Galley>),
+        Entry(Arc<egui::Galley>, Arc<egui::Galley>),
+    }
+    let title = p.layout_no_wrap(
         tr!("draw-help-title"),
         egui::FontId::proportional(15.0),
         t.accent,
     );
-    let mut y = origin.y + 26.0;
-    for row in &rows {
-        match row {
+    let lines: Vec<Line> = rows
+        .into_iter()
+        .map(|row| match row {
             HelpRow::Group(name) => {
+                Line::Group(p.layout_no_wrap(name, group_font.clone(), t.accent))
+            }
+            HelpRow::Entry(key, desc) => Line::Entry(
+                p.layout_no_wrap(key, key_font.clone(), key_color),
+                p.layout_no_wrap(desc, desc_font.clone(), t.text),
+            ),
+        })
+        .collect();
+    let key_w = lines
+        .iter()
+        .filter_map(|l| match l {
+            Line::Entry(key, _) => Some(key.size().x),
+            Line::Group(_) => None,
+        })
+        .fold(0.0, f32::max);
+    let desc_x = key_indent + key_w + col_gap;
+    let content_w = lines
+        .iter()
+        .map(|l| match l {
+            Line::Group(name) => name.size().x,
+            Line::Entry(_, desc) => desc_x + desc.size().x,
+        })
+        .fold(title.size().x, f32::max);
+    let content_h: f32 = lines
+        .iter()
+        .map(|l| match l {
+            Line::Group(_) => line_h + group_gap,
+            Line::Entry(..) => line_h,
+        })
+        .sum();
+    let panel = egui::Rect::from_min_size(
+        origin - egui::vec2(pad, pad),
+        egui::vec2(content_w + 2.0 * pad, content_h + 40.0),
+    );
+    p.rect_filled(panel, 10.0, egui::Color32::from_black_alpha(220));
+    p.galley(origin, title, t.accent);
+    let mut y = origin.y + 26.0;
+    for line in lines {
+        match line {
+            Line::Group(name) => {
                 y += group_gap;
-                p.text(
-                    egui::pos2(origin.x, y),
-                    egui::Align2::LEFT_TOP,
-                    name,
-                    group_font.clone(),
-                    t.accent,
-                );
+                p.galley(egui::pos2(origin.x, y), name, t.accent);
                 y += line_h;
             }
-            HelpRow::Entry(key, desc) => {
-                p.text(
-                    egui::pos2(origin.x + 10.0, y),
-                    egui::Align2::LEFT_TOP,
-                    key,
-                    key_font.clone(),
-                    egui::Color32::from_white_alpha(230),
-                );
-                p.text(
-                    egui::pos2(origin.x + key_col, y),
-                    egui::Align2::LEFT_TOP,
-                    desc,
-                    desc_font.clone(),
-                    t.text,
-                );
+            Line::Entry(key, desc) => {
+                p.galley(egui::pos2(origin.x + key_indent, y), key, key_color);
+                p.galley(egui::pos2(origin.x + desc_x, y), desc, t.text);
                 y += line_h;
             }
         }
