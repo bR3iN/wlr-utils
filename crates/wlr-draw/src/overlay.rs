@@ -46,9 +46,23 @@ use smithay_client_toolkit::{
 };
 use std::time::{Duration, Instant};
 use wayland_client::{
-    Connection, QueueHandle,
+    Connection, Dispatch, QueueHandle, delegate_noop, event_created_child,
     globals::registry_queue_init,
     protocol::{wl_keyboard, wl_output, wl_pointer, wl_seat, wl_surface},
+};
+// Raw zwp_tablet_manager_v2 bindings (stylus support): SCTK has no tablet wrapper, so
+// this crate hand-dispatches the protocol directly (see the `Dispatch` impls below),
+// the same way `wlr-capture`'s `wl.rs` hand-dispatches zwlr-foreign-toplevel.
+use wayland_protocols::wp::tablet::zv2::client::{
+    zwp_tablet_manager_v2::ZwpTabletManagerV2,
+    zwp_tablet_pad_dial_v2::ZwpTabletPadDialV2,
+    zwp_tablet_pad_group_v2::{self, ZwpTabletPadGroupV2},
+    zwp_tablet_pad_ring_v2::ZwpTabletPadRingV2,
+    zwp_tablet_pad_strip_v2::ZwpTabletPadStripV2,
+    zwp_tablet_pad_v2::{self, ZwpTabletPadV2},
+    zwp_tablet_seat_v2::{self, ZwpTabletSeatV2},
+    zwp_tablet_tool_v2::{self, ZwpTabletToolV2},
+    zwp_tablet_v2::ZwpTabletV2,
 };
 use wlr_capture::render::Gpu;
 use wlr_capture::theme::Theme;
@@ -206,6 +220,24 @@ enum Gesture {
     },
 }
 
+/// Live state for one `zwp_tablet_tool_v2` (e.g. a stylus's pen or eraser end). A tool
+/// object persists across proximity in/out, so this is tracked for the tool's whole
+/// lifetime, not just one contact.
+struct TabletTool {
+    proxy: ZwpTabletToolV2,
+    /// Physical tool type, from the one-time `type` event sent before `done`.
+    kind: Option<zwp_tablet_tool_v2::Type>,
+    /// Surface the tool is currently focused on, captured on `proximity_in` — `motion`,
+    /// `down` and `up` carry no surface of their own.
+    surface: Option<wl_surface::WlSurface>,
+    /// The tool selected before this contact switched to `Tool::Eraser`, so
+    /// `proximity_out` can restore it. `None` unless this contact auto-switched.
+    saved_tool: Option<Tool>,
+    /// Last known surface-local position, since `down`/`up` carry no coordinates of
+    /// their own.
+    last_pos: Option<(f64, f64)>,
+}
+
 /// An immutable view of the drawing state handed to each surface's painter.
 struct Frame<'a> {
     elements: &'a [Element],
@@ -249,6 +281,15 @@ struct State {
     output_state: OutputState,
     keyboard: Option<wl_keyboard::WlKeyboard>,
     pointer: Option<wl_pointer::WlPointer>,
+    /// `zwp_tablet_manager_v2`, if the compositor advertises tablet support. Stylus
+    /// input is optional — everything else works unchanged without it.
+    tablet_manager: Option<ZwpTabletManagerV2>,
+    /// One tablet seat per `wl_seat` present at startup, kept alive so the compositor
+    /// keeps sending tool/tablet/pad events on them. Requested in `run()`, the same
+    /// place output surfaces are built for the outputs present at startup.
+    tablet_seat: Vec<ZwpTabletSeatV2>,
+    /// Live per-tool tablet state (typically 1-2 entries: pen and/or eraser end).
+    tablet_tools: Vec<TabletTool>,
     /// Calloop handle, needed to wire up keyboard repeat when the seat appears.
     loop_handle: LoopHandle<'static, State>,
     surfaces: Vec<Surface>,
@@ -1209,6 +1250,9 @@ pub fn run() -> anyhow::Result<()> {
     let layer_shell =
         LayerShell::bind(&globals, &qh).map_err(|e| anyhow::anyhow!("layer-shell missing: {e}"))?;
     let empty_region = Region::new(&compositor).map_err(|e| anyhow::anyhow!("wl_region: {e}"))?;
+    // Tablet (stylus) support is optional: a compositor without it just runs with mouse
+    // input only, same graceful-degradation style as `capture_available` below.
+    let tablet_manager: Option<ZwpTabletManagerV2> = globals.bind(&qh, 1..=2, ()).ok();
 
     // The calloop loop is created up front so its handle can be handed to the keyboard
     // (for repeat) when the seat capability appears during the roundtrips below.
@@ -1223,6 +1267,9 @@ pub fn run() -> anyhow::Result<()> {
         output_state: OutputState::new(&globals, &qh),
         keyboard: None,
         pointer: None,
+        tablet_manager,
+        tablet_seat: Vec::new(),
+        tablet_tools: Vec::new(),
         loop_handle: lh.clone(),
         surfaces: Vec::new(),
         compositor,
@@ -1280,6 +1327,15 @@ pub fn run() -> anyhow::Result<()> {
     }
     if state.surfaces.is_empty() {
         anyhow::bail!("no outputs to draw on");
+    }
+    // Likewise, request the tablet seat for each `wl_seat` present at startup: SCTK's
+    // `SeatState` binds those seats directly in its constructor, before `new_seat`
+    // exists to be called, so hooking a capability handler would miss them.
+    if let Some(mgr) = &state.tablet_manager {
+        let seats: Vec<_> = state.seat_state.seats().collect();
+        for seat in seats {
+            state.tablet_seat.push(mgr.get_tablet_seat(&seat, &qh, ()));
+        }
     }
     event_queue.roundtrip(&mut state)?;
 
@@ -2337,7 +2393,12 @@ impl SeatHandler for State {
     fn seat_state(&mut self) -> &mut SeatState {
         &mut self.seat_state
     }
-    fn new_seat(&mut self, _: &Connection, _: &QueueHandle<Self>, _: wl_seat::WlSeat) {}
+    fn new_seat(&mut self, _: &Connection, qh: &QueueHandle<Self>, seat: wl_seat::WlSeat) {
+        // Startup seats are bound in `run()`; this only covers one hotplugged later.
+        if let Some(mgr) = &self.tablet_manager {
+            self.tablet_seat.push(mgr.get_tablet_seat(&seat, qh, ()));
+        }
+    }
     fn new_capability(
         &mut self,
         _: &Connection,
@@ -2587,6 +2648,192 @@ impl PointerHandler for State {
         }
     }
 }
+
+// --- Tablet (stylus) support ---
+//
+// SCTK has no tablet wrapper (it isn't a `wl_seat` capability either), so these are
+// hand-written `Dispatch` impls, following the same manual pattern already used in
+// `wlr-capture`'s `wl.rs` for `zwlr_foreign_toplevel_manager_v1`. Basic support only:
+// tip contact and motion drive the same `on_press`/`on_motion`/`on_release` pipeline
+// the mouse uses; pressure/tilt/distance and stylus barrel buttons are out of scope
+// and left as no-ops. The tablet pad (express keys/rings/strips) is irrelevant to this
+// app — bound only enough to satisfy the protocol's child-object lifecycle.
+
+impl Dispatch<ZwpTabletSeatV2, ()> for State {
+    fn event(
+        state: &mut Self,
+        _: &ZwpTabletSeatV2,
+        event: zwp_tablet_seat_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_tablet_seat_v2::Event;
+        if let Event::ToolAdded { id } = event {
+            state.tablet_tools.push(TabletTool {
+                proxy: id,
+                kind: None,
+                surface: None,
+                saved_tool: None,
+                last_pos: None,
+            });
+        }
+        // TabletAdded (tablet identity: name/vid/pid/path) and PadAdded (express keys,
+        // rings, strips) are bound below purely to satisfy the object lifecycle, then
+        // ignored — neither matters for stylus-as-pointer support.
+    }
+
+    event_created_child!(State, ZwpTabletSeatV2, [
+        zwp_tablet_seat_v2::EVT_TABLET_ADDED_OPCODE => (ZwpTabletV2, ()),
+        zwp_tablet_seat_v2::EVT_TOOL_ADDED_OPCODE => (ZwpTabletToolV2, ()),
+        zwp_tablet_seat_v2::EVT_PAD_ADDED_OPCODE => (ZwpTabletPadV2, ()),
+    ]);
+}
+
+/// A tool's last known position in global logical coordinates, i.e. `last_pos`
+/// (surface-local) run through `to_global` against its current `surface`. Callers that
+/// need a fallback should fall back to `state.pointer_pos`, which is already global —
+/// never to `last_pos` directly, or it gets the surface offset applied twice.
+fn tablet_tool_global(state: &State, t: &TabletTool) -> Option<(f64, f64)> {
+    state.to_global(t.surface.as_ref()?, t.last_pos?)
+}
+
+impl Dispatch<ZwpTabletToolV2, ()> for State {
+    fn event(
+        state: &mut Self,
+        proxy: &ZwpTabletToolV2,
+        event: zwp_tablet_tool_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+        use zwp_tablet_tool_v2::Event;
+        let Some(idx) = state.tablet_tools.iter().position(|t| &t.proxy == proxy) else {
+            return;
+        };
+        match event {
+            Event::Type { tool_type } => {
+                state.tablet_tools[idx].kind = tool_type.into_result().ok();
+            }
+            Event::ProximityIn { surface, .. } => {
+                state.tablet_tools[idx].surface = Some(surface);
+                if state.tablet_tools[idx].kind == Some(zwp_tablet_tool_v2::Type::Eraser) {
+                    let prev = state.tool;
+                    state.tablet_tools[idx].saved_tool = Some(prev);
+                    state.apply_cmd(Cmd::Tool(Tool::Eraser));
+                }
+            }
+            Event::ProximityOut => {
+                // Only restore if the tool is still on Eraser: the user may have picked a
+                // different tool while this contact was in proximity, and lifting the pen
+                // away shouldn't silently revert that choice.
+                let saved = state.tablet_tools[idx].saved_tool.take();
+                if state.tool == Tool::Eraser
+                    && let Some(prev) = saved
+                {
+                    state.apply_cmd(Cmd::Tool(prev));
+                }
+                let t = &mut state.tablet_tools[idx];
+                t.surface = None;
+                t.last_pos = None;
+                // Mirror the pointer's `Leave`: nothing is hovering any more, so the
+                // flashlight circle and do_save shouldn't keep using a stale position.
+                state.pointer_pos = None;
+                state.dirty = true;
+            }
+            Event::Motion { x, y } => {
+                state.tablet_tools[idx].last_pos = Some((x, y));
+                // Update on every hover motion, not just while the tip is down — same as
+                // the pointer's Motion, which drives the flashlight circle and do_save
+                // even when no button/gesture is active.
+                if let Some(g) = tablet_tool_global(state, &state.tablet_tools[idx]) {
+                    state.pointer_pos = Some(g);
+                    if !matches!(state.gesture, Gesture::None) {
+                        state.on_motion((g.0 as f32, g.1 as f32));
+                    } else {
+                        state.dirty = true; // move the (potential) shape preview anchor
+                    }
+                }
+            }
+            Event::Down { .. } => {
+                // The colour popup eats the tap (pick a swatch / dismiss) instead of
+                // starting a stroke, same as a mouse click.
+                if state.show_palette {
+                    let surface = state.tablet_tools[idx].surface.clone();
+                    let pos = state.tablet_tools[idx].last_pos;
+                    if let Some(surface) = surface
+                        && let Some(pos) = pos
+                    {
+                        state.palette_click(&surface, pos);
+                    }
+                } else if let Some(g) =
+                    tablet_tool_global(state, &state.tablet_tools[idx]).or(state.pointer_pos)
+                {
+                    state.pointer_pos = Some(g);
+                    state.on_press((g.0 as f32, g.1 as f32));
+                }
+            }
+            Event::Up => {
+                if let Some(g) =
+                    tablet_tool_global(state, &state.tablet_tools[idx]).or(state.pointer_pos)
+                {
+                    state.on_release((g.0 as f32, g.1 as f32));
+                }
+            }
+            // The protocol requires the client to destroy a tool object once it's
+            // removed from the system.
+            Event::Removed => {
+                proxy.destroy();
+                state.tablet_tools.remove(idx);
+            }
+            // Pressure-sensitive width and barrel buttons are out of scope for this
+            // basic stylus-as-pointer pass; Frame is a batch marker we don't need since
+            // events are applied immediately as they arrive.
+            Event::Pressure { .. } | Event::Button { .. } | Event::Frame { .. } => {}
+            _ => {}
+        }
+    }
+}
+
+impl Dispatch<ZwpTabletPadV2, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTabletPadV2,
+        _: zwp_tablet_pad_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+
+    event_created_child!(State, ZwpTabletPadV2, [
+        zwp_tablet_pad_v2::EVT_GROUP_OPCODE => (ZwpTabletPadGroupV2, ()),
+    ]);
+}
+
+impl Dispatch<ZwpTabletPadGroupV2, ()> for State {
+    fn event(
+        _: &mut Self,
+        _: &ZwpTabletPadGroupV2,
+        _: zwp_tablet_pad_group_v2::Event,
+        _: &(),
+        _: &Connection,
+        _: &QueueHandle<Self>,
+    ) {
+    }
+
+    event_created_child!(State, ZwpTabletPadGroupV2, [
+        zwp_tablet_pad_group_v2::EVT_RING_OPCODE => (ZwpTabletPadRingV2, ()),
+        zwp_tablet_pad_group_v2::EVT_STRIP_OPCODE => (ZwpTabletPadStripV2, ()),
+        zwp_tablet_pad_group_v2::EVT_DIAL_OPCODE => (ZwpTabletPadDialV2, ()),
+    ]);
+}
+
+delegate_noop!(State: ignore ZwpTabletManagerV2);
+delegate_noop!(State: ignore ZwpTabletV2);
+delegate_noop!(State: ignore ZwpTabletPadRingV2);
+delegate_noop!(State: ignore ZwpTabletPadStripV2);
+delegate_noop!(State: ignore ZwpTabletPadDialV2);
 
 impl OutputHandler for State {
     fn output_state(&mut self) -> &mut OutputState {
