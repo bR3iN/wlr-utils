@@ -21,11 +21,12 @@ the same report, so a single-tool install can produce it too.
 | --- | --- | --- |
 | `ext-image-copy-capture-v1` + `ext-image-capture-source-v1` + the output / foreign-toplevel source managers | the **capture engine** (frames of an output or a window) | everything |
 | `ext-foreign-toplevel-list-v1` | enumerating windows | `wlr-chooser`, `-w`, `wlr-peek mirror`, window record/watch |
-| `wlr-layer-shell` (`zwlr_layer_shell_v1`) | full-screen overlays | the region selector (`-s`), `wlr-peek loupe`/`color`, `wlr-switcher`, `wlr-chooser` |
+| `wlr-layer-shell` (`zwlr_layer_shell_v1`) | full-screen overlays | the region selector (`-s`), `wlr-peek loupe`/`color`, `wlr-switcher`, `wlr-chooser`, `wlr-draw` |
 | `wlr-data-control` (`zwlr_data_control_manager_v1`) | clipboard copy | `-c`/`--clipboard` |
 | `keyboard-shortcuts-inhibit` (`zwp_keyboard_shortcuts_inhibit_manager_v1`) | grabbing keys under a layer-shell grab | `wlr-switcher` (so `Alt+Tab` reaches it) |
 | `linux-dmabuf` (`zwp_linux_dmabuf_v1`) | zero-copy GPU capture (CPU `wl_shm` is the fallback) | live previews: `wlr-chooser`, `wlr-switcher`, `wlr-peek mirror`, `wlr-shot record` |
 | `xdg-output` (`zxdg_output_manager_v1`) | accurate logical geometry (fractional scale, positions) | recommended; falls back to `wl_output` |
+| `tablet-v2` (`zwp_tablet_manager_v2`) | graphics tablet (stylus) input | optional, `wlr-draw`; without it, mouse only |
 | compositor IPC | "the active window" / "the current output" (`-a`, `--current-output`) | a per-compositor focus backend |
 
 `ext-image-capture-source-v1` is the linchpin, and it landed in two steps: the base

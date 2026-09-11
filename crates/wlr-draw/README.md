@@ -154,10 +154,12 @@ grey when idle).
 
 ### Graphics tablet (stylus)
 
-A stylus tip draws exactly like the mouse — press, drag, release. The **eraser end** of
-the pen auto-switches to the Eraser tool on proximity and restores your previous tool
-when you lift the pen away (unless you picked a different tool in the meantime). No
-setup needed; a compositor without tablet support just runs with mouse/touchpad input.
+The stylus tip acts as the **left mouse button** — draw, drag shapes, pick from the colour
+palette — and hovering moves the flashlight like the cursor. The **eraser end** switches
+to the Eraser tool when it nears the tablet and restores your previous tool when you lift
+it away (unless you picked another one meanwhile). Pressure, tilt and the barrel buttons
+are ignored: to move an element, use the move tool (`s`) rather than a right-drag. No
+setup needed; a compositor without tablet support just runs with the mouse.
 
 ## Running the daemon
 
@@ -270,6 +272,8 @@ cargo build --release -p wlr-draw
   wlroots ≥ 0.19**. Where it's missing, freeze and save are hidden from the help/tray and
   plain annotation still works. Run `wlr-draw doctor` to check your own; see
   [COMPATIBILITY.md](../../COMPATIBILITY.md).
+- **Stylus** (optional) — `tablet-v2` (`zwp_tablet_manager_v2`); without it the stylus
+  isn't seen and everything else works.
 - **Tray** (`tray` feature, on by default) — a StatusNotifierItem host and `libdbus`.
   `--no-default-features` drops the tray and its D-Bus dependency.
 

@@ -192,6 +192,11 @@ Bug reports, translations and patches welcome — see
 [CONTRIBUTING.md](CONTRIBUTING.md). Please keep `cargo fmt`, `cargo clippy` and
 `cargo test` clean.
 
+## Contributors
+
+- [Jadi Mirmirani](https://github.com/jadijadi) — graphics tablet (stylus) support in
+  wlr-draw ([#9](https://github.com/sjourdois/wlr-utils/pull/9))
+
 ## License
 
 Licensed under either of [Apache-2.0](LICENSE-APACHE) or [MIT](LICENSE-MIT) at your
