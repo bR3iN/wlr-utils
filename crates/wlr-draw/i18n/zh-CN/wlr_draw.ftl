@@ -2,7 +2,7 @@
 
 draw-hint = 绘图 · h 帮助 · Esc 离开
 draw-passthrough-hint = 点击穿透 — 按 Caps Lock 重新绘图
-draw-text-hint = 输入文字 · Enter 放置 · Esc 取消
+draw-text-hint = 输入文字 · Enter 确定 · Esc 取消
 draw-spotlight-hint = 聚光灯 · 拖出形状或移动光标 · 滚轮/i k 大小 · 倾斜/j l 暗度 · 松开 Shift 结束
 draw-tool-pen = 画笔
 draw-tool-rect = 矩形
@@ -29,6 +29,7 @@ draw-help-passthrough = 点击穿透到应用
 draw-help-draw = 绘制
 draw-help-snap = 吸附为规整形状
 draw-help-text = 输入文字
+draw-help-text-end = 确定 / 取消文字
 draw-help-move = 移动所选
 draw-help-freeze = 冻结屏幕
 draw-help-rightmove = 移动元素
@@ -42,6 +43,8 @@ draw-help-key-drag = 拖动
 draw-help-key-hold = 按住
 draw-help-key-rdrag = 右键拖动
 draw-help-key-type = 输入
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = 绘图中
 tray-status-idle = 空闲（点击穿透）
 tray-toggle = 切换绘图模式

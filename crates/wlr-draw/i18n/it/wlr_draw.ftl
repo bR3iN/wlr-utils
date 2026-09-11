@@ -2,7 +2,7 @@
 
 draw-hint = Disegna · h per aiuto · Esc per uscire
 draw-passthrough-hint = Click passante — Bloc Maiusc per disegnare di nuovo
-draw-text-hint = Digita · Invio per posizionare · Esc per annullare
+draw-text-hint = Digita · Invio per confermare · Esc per annullare
 draw-spotlight-hint = Faretto · trascina una forma o muovi il cursore · rotella/i k dimensione · inclina/j l intensità · rilascia Shift per terminare
 draw-tool-pen = Penna
 draw-tool-rect = Rettangolo
@@ -29,6 +29,7 @@ draw-help-passthrough = Click passante alle app
 draw-help-draw = Disegna
 draw-help-snap = Aggancia a una forma pulita
 draw-help-text = Inserisci testo
+draw-help-text-end = Conferma / annulla il testo
 draw-help-move = Sposta selezione
 draw-help-freeze = Congela lo schermo
 draw-help-rightmove = Sposta un elemento
@@ -42,6 +43,8 @@ draw-help-key-drag = Trascina
 draw-help-key-hold = Tieni
 draw-help-key-rdrag = Trascina dx
 draw-help-key-type = Digita
+draw-help-key-text-end = Invio / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Disegno in corso
 tray-status-idle = Inattivo (click passante)
 tray-toggle = Attiva/disattiva modalità disegno

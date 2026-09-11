@@ -2,7 +2,7 @@
 
 draw-hint = Desenhar · h para ajuda · Esc para sair
 draw-passthrough-hint = Clique passa direto — Caps Lock para desenhar de novo
-draw-text-hint = Digite · Enter para posicionar · Esc para cancelar
+draw-text-hint = Digite · Enter para confirmar · Esc para cancelar
 draw-spotlight-hint = Holofote · arraste uma forma, ou mova o cursor · roda/i k tamanho · inclinar/j l escurecer · solte Shift para terminar
 draw-tool-pen = Caneta
 draw-tool-rect = Retângulo
@@ -29,6 +29,7 @@ draw-help-passthrough = Clique passa direto para os apps
 draw-help-draw = Desenhar
 draw-help-snap = Ajustar para uma forma limpa
 draw-help-text = Inserir texto
+draw-help-text-end = Confirmar / cancelar o texto
 draw-help-move = Mover seleção
 draw-help-freeze = Congelar a tela
 draw-help-rightmove = Mover um elemento
@@ -42,6 +43,8 @@ draw-help-key-drag = Arrastar
 draw-help-key-hold = Segurar
 draw-help-key-rdrag = Arrastar dir.
 draw-help-key-type = Digitar
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Desenhando
 tray-status-idle = Ocioso (clique passa direto)
 tray-toggle = Alternar modo desenho

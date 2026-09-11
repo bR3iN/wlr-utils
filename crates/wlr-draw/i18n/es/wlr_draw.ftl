@@ -2,7 +2,7 @@
 
 draw-hint = Dibuja · h para ayuda · Esc para salir
 draw-passthrough-hint = Clic atravesado — Bloq Mayús para volver a dibujar
-draw-text-hint = Escribe · Enter para colocar · Esc para cancelar
+draw-text-hint = Escribe · Enter para confirmar · Esc para cancelar
 draw-spotlight-hint = Foco · arrastra una forma o mueve el cursor · rueda/i k tamaño · inclina/j l atenúa · suelta Shift para terminar
 draw-tool-pen = Lápiz
 draw-tool-rect = Rectángulo
@@ -29,6 +29,7 @@ draw-help-passthrough = Clic atravesado a las apps
 draw-help-draw = Dibujar
 draw-help-snap = Ajustar a una forma limpia
 draw-help-text = Escribir texto
+draw-help-text-end = Confirmar / cancelar el texto
 draw-help-move = Mover selección
 draw-help-freeze = Congelar la pantalla
 draw-help-rightmove = Mover un elemento
@@ -42,6 +43,8 @@ draw-help-key-drag = Arrastrar
 draw-help-key-hold = Mantener
 draw-help-key-rdrag = Arrastre der.
 draw-help-key-type = Escribir
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Dibujando
 tray-status-idle = Inactivo (clic atravesado)
 tray-toggle = Alternar modo dibujo

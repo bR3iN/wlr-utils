@@ -2,7 +2,7 @@
 
 draw-hint = 描画 · h でヘルプ · Esc で終了
 draw-passthrough-hint = クリックスルー中 — Caps Lock で描画に戻る
-draw-text-hint = 入力 · Enter で配置 · Esc でキャンセル
+draw-text-hint = 入力 · Enter で確定 · Esc でキャンセル
 draw-spotlight-hint = スポットライト · 図形をドラッグ、またはカーソルを移動 · ホイール/i k サイズ · 傾き/j l 暗さ · Shift を離して終了
 draw-tool-pen = ペン
 draw-tool-rect = 四角形
@@ -29,6 +29,7 @@ draw-help-passthrough = アプリへクリックスルー
 draw-help-draw = 描画
 draw-help-snap = きれいな図形に補正
 draw-help-text = テキストを入力
+draw-help-text-end = テキストを確定 / キャンセル
 draw-help-move = 選択を移動
 draw-help-freeze = 画面を静止
 draw-help-rightmove = 要素を移動
@@ -42,6 +43,8 @@ draw-help-key-drag = ドラッグ
 draw-help-key-hold = 長押し
 draw-help-key-rdrag = 右ドラッグ
 draw-help-key-type = 入力
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = 描画中
 tray-status-idle = 待機中（クリックスルー）
 tray-toggle = 描画モードを切替

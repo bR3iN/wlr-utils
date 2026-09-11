@@ -2,7 +2,7 @@
 
 draw-hint = Dessin · h pour l'aide · Échap pour quitter
 draw-passthrough-hint = Clic transparent — Verr. Maj pour redessiner
-draw-text-hint = Saisissez · Entrée pour placer · Échap pour annuler
+draw-text-hint = Saisissez · Entrée pour valider · Échap pour annuler
 draw-spotlight-hint = Spotlight · tracez une forme, ou bougez le curseur · molette/i k taille · inclinaison/j l assombrir · relâchez Maj pour finir
 draw-tool-pen = Stylo
 draw-tool-rect = Rectangle
@@ -29,6 +29,7 @@ draw-help-passthrough = Cliquer à travers vers les apps
 draw-help-draw = Dessiner
 draw-help-snap = Aligner sur une forme nette
 draw-help-text = Saisir du texte
+draw-help-text-end = Valider / annuler le texte
 draw-help-move = Ajuster la sélection
 draw-help-freeze = Geler l'écran
 draw-help-rightmove = Déplacer un élément
@@ -42,6 +43,8 @@ draw-help-key-drag = Glisser
 draw-help-key-hold = Maintenir
 draw-help-key-rdrag = Clic-droit
 draw-help-key-type = Saisir
+draw-help-key-text-end = Entrée / Échap
+draw-help-key-esc = Échap
 tray-status-drawing = Dessin
 tray-status-idle = Inactif (clic à travers)
 tray-toggle = Activer/désactiver le dessin

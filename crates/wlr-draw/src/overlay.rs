@@ -2219,7 +2219,10 @@ pub(crate) fn shortcut_rows(km: &Keymap, capture_available: bool) -> Vec<HelpRow
         rows.push(HelpRow::Entry(key(Action::Freeze), tr!("draw-help-freeze")));
     }
     rows.push(HelpRow::Entry(key(Action::Help), tr!("draw-help-help")));
-    rows.push(HelpRow::Entry("Esc".into(), tr!("draw-help-leave")));
+    rows.push(HelpRow::Entry(
+        tr!("draw-help-key-esc"),
+        tr!("draw-help-leave"),
+    ));
 
     rows.push(HelpRow::Group(tr!("draw-help-group-hold")));
     rows.push(HelpRow::Entry(
@@ -2256,6 +2259,10 @@ pub(crate) fn shortcut_rows(km: &Keymap, capture_available: bool) -> Vec<HelpRow
     rows.push(HelpRow::Entry(
         tr!("draw-help-key-type"),
         tr!("draw-help-text"),
+    ));
+    rows.push(HelpRow::Entry(
+        tr!("draw-help-key-text-end"),
+        tr!("draw-help-text-end"),
     ));
     rows
 }

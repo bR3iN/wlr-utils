@@ -2,7 +2,7 @@
 
 draw-hint = Tekenen · h voor hulp · Esc om te stoppen
 draw-passthrough-hint = Klik-door — Caps Lock om opnieuw te tekenen
-draw-text-hint = Typ · Enter om te plaatsen · Esc om te annuleren
+draw-text-hint = Typ · Enter om te bevestigen · Esc om te annuleren
 draw-spotlight-hint = Spotlight · sleep een vorm, of beweeg de cursor · wiel/i k grootte · kantel/j l dimmen · Shift los om te stoppen
 draw-tool-pen = Pen
 draw-tool-rect = Rechthoek
@@ -29,6 +29,7 @@ draw-help-passthrough = Doorklikken naar apps
 draw-help-draw = Tekenen
 draw-help-snap = Uitlijnen op een nette vorm
 draw-help-text = Tekst invoeren
+draw-help-text-end = Tekst bevestigen / annuleren
 draw-help-move = Selectie verplaatsen
 draw-help-freeze = Scherm bevriezen
 draw-help-rightmove = Element verplaatsen
@@ -42,6 +43,8 @@ draw-help-key-drag = Slepen
 draw-help-key-hold = Vasthouden
 draw-help-key-rdrag = Rechts slepen
 draw-help-key-type = Typen
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Aan het tekenen
 tray-status-idle = Inactief (klik-door)
 tray-toggle = Tekenmodus wisselen

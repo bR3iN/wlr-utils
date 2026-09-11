@@ -2,7 +2,7 @@
 
 draw-hint = Рисование · h — справка · Esc — выйти
 draw-passthrough-hint = Сквозной клик — Caps Lock, чтобы снова рисовать
-draw-text-hint = Печатайте · Enter — поместить · Esc — отмена
+draw-text-hint = Печатайте · Enter — готово · Esc — отмена
 draw-spotlight-hint = Подсветка · обведите фигуру или ведите курсор · колесо/i k размер · наклон/j l затемнение · отпустите Shift для завершения
 draw-tool-pen = Перо
 draw-tool-rect = Прямоугольник
@@ -29,6 +29,7 @@ draw-help-passthrough = Сквозной клик в приложения
 draw-help-draw = Рисовать
 draw-help-snap = Привязка к чёткой фигуре
 draw-help-text = Ввести текст
+draw-help-text-end = Завершить / отменить текст
 draw-help-move = Переместить выделение
 draw-help-freeze = Заморозить экран
 draw-help-rightmove = Переместить элемент
@@ -42,6 +43,8 @@ draw-help-key-drag = Перетаскивание
 draw-help-key-hold = Удержание
 draw-help-key-rdrag = Перетаск. ПКМ
 draw-help-key-type = Ввод
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Рисование
 tray-status-idle = Ожидание (сквозной клик)
 tray-toggle = Переключить режим рисования

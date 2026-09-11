@@ -2,7 +2,7 @@
 
 draw-hint = Zeichnen · h für Hilfe · Esc zum Verlassen
 draw-passthrough-hint = Klick durchreichen — Feststelltaste zum Weiterzeichnen
-draw-text-hint = Tippen · Enter zum Platzieren · Esc zum Abbrechen
+draw-text-hint = Tippen · Enter zum Übernehmen · Esc zum Abbrechen
 draw-spotlight-hint = Spotlight · Form ziehen oder Cursor bewegen · Rad/i k Größe · Neigen/j l Abdunklung · Shift los zum Beenden
 draw-tool-pen = Stift
 draw-tool-rect = Rechteck
@@ -29,6 +29,7 @@ draw-help-passthrough = Klicks an Apps durchreichen
 draw-help-draw = Zeichnen
 draw-help-snap = Auf saubere Form einrasten
 draw-help-text = Text eingeben
+draw-help-text-end = Text übernehmen / verwerfen
 draw-help-move = Auswahl verschieben
 draw-help-freeze = Bildschirm einfrieren
 draw-help-rightmove = Element verschieben
@@ -42,6 +43,8 @@ draw-help-key-drag = Ziehen
 draw-help-key-hold = Halten
 draw-help-key-rdrag = Rechtsziehen
 draw-help-key-type = Tippen
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Zeichnen
 tray-status-idle = Inaktiv (Klick durchreichen)
 tray-toggle = Zeichenmodus umschalten

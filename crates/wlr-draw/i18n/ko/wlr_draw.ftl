@@ -2,7 +2,7 @@
 
 draw-hint = 그리기 · h 도움말 · Esc 나가기
 draw-passthrough-hint = 클릭 통과 — Caps Lock 다시 그리기
-draw-text-hint = 입력 · Enter 배치 · Esc 취소
+draw-text-hint = 입력 · Enter 확정 · Esc 취소
 draw-spotlight-hint = 스포트라이트 · 도형을 드래그하거나 커서를 이동 · 휠/i k 크기 · 기울이기/j l 어둡기 · Shift 떼면 종료
 draw-tool-pen = 펜
 draw-tool-rect = 사각형
@@ -29,6 +29,7 @@ draw-help-passthrough = 앱으로 클릭 통과
 draw-help-draw = 그리기
 draw-help-snap = 깔끔한 도형으로 맞추기
 draw-help-text = 텍스트 입력
+draw-help-text-end = 텍스트 확정 / 취소
 draw-help-move = 선택 이동
 draw-help-freeze = 화면 정지
 draw-help-rightmove = 요소 이동
@@ -42,6 +43,8 @@ draw-help-key-drag = 드래그
 draw-help-key-hold = 길게 누르기
 draw-help-key-rdrag = 오른쪽 드래그
 draw-help-key-type = 입력
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = 그리는 중
 tray-status-idle = 대기 (클릭 통과)
 tray-toggle = 그리기 모드 전환

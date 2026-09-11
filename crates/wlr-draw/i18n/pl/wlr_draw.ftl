@@ -2,7 +2,7 @@
 
 draw-hint = Rysuj · h pomoc · Esc wyjście
 draw-passthrough-hint = Klikanie przez warstwę — Caps Lock wraca do rysowania
-draw-text-hint = Pisz · Enter umieszcza · Esc anuluje
+draw-text-hint = Pisz · Enter zatwierdza · Esc anuluje
 draw-spotlight-hint = Reflektor · przeciągnij kształt lub poruszaj kursorem · kółko/i k rozmiar · przechył/j l przyciemnienie · puść Shift, aby zakończyć
 draw-tool-pen = Pióro
 draw-tool-rect = Prostokąt
@@ -29,6 +29,7 @@ draw-help-passthrough = Klikanie przez warstwę do aplikacji
 draw-help-draw = Rysuj
 draw-help-snap = Dopasuj do czystego kształtu
 draw-help-text = Wpisz tekst
+draw-help-text-end = Zatwierdź / anuluj tekst
 draw-help-move = Przesuń zaznaczenie
 draw-help-freeze = Zamroź ekran
 draw-help-rightmove = Przesuń element
@@ -42,6 +43,8 @@ draw-help-key-drag = Przeciągnij
 draw-help-key-hold = Przytrzymaj
 draw-help-key-rdrag = Przeciąg. PPM
 draw-help-key-type = Pisz
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Rysowanie
 tray-status-idle = Bezczynny (klikanie przez warstwę)
 tray-toggle = Przełącz tryb rysowania

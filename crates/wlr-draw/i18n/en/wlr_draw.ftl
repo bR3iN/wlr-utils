@@ -2,7 +2,7 @@
 
 draw-hint = Draw · h for help · Esc to leave
 draw-passthrough-hint = Click-through — Caps Lock to draw again
-draw-text-hint = Type · Enter to place · Esc to cancel
+draw-text-hint = Type · Enter to finish · Esc to cancel
 draw-spotlight-hint = Spotlight · drag a shape, or move the cursor · wheel/i k size · tilt/j l dim · Shift off to end
 draw-tool-pen = Pen
 draw-tool-rect = Rectangle
@@ -29,6 +29,7 @@ draw-help-passthrough = Click through to apps
 draw-help-draw = Draw
 draw-help-snap = Snap to a clean shape
 draw-help-text = Enter text
+draw-help-text-end = Finish / cancel the text
 draw-help-move = Nudge selection
 draw-help-freeze = Freeze the screen
 draw-help-rightmove = Move any element
@@ -42,6 +43,8 @@ draw-help-key-drag = Drag
 draw-help-key-hold = Hold
 draw-help-key-rdrag = R-drag
 draw-help-key-type = Type
+draw-help-key-text-end = Enter / Esc
+draw-help-key-esc = Esc
 tray-status-drawing = Drawing
 tray-status-idle = Idle (click-through)
 tray-toggle = Toggle draw mode
