@@ -76,7 +76,7 @@ const CHECKS: &[(&str, &str)] = &[
     ("zxdg_output_manager_v1", "accurate output geometry"),
     (
         "zwlr_layer_shell_v1",
-        "overlays: region select, loupe, switcher",
+        "overlays: region select, loupe, switcher, wlr-draw",
     ),
     ("zwlr_data_control_manager_v1", "clipboard copy (-c)"),
     ("zwp_linux_dmabuf_v1", "zero-copy GPU capture"),
@@ -84,6 +84,7 @@ const CHECKS: &[(&str, &str)] = &[
         "zwp_keyboard_shortcuts_inhibit_manager_v1",
         "switcher keyboard grab",
     ),
+    ("zwp_tablet_manager_v2", "stylus input (wlr-draw)"),
 ];
 
 /// Whether the compositor advertises the screen- and window-capture sources.
