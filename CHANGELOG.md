@@ -4,14 +4,25 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
-## Unreleased
+## 1.8.0 — 2026-09-11
 
 ### Added
 
-- **`wlr-draw`: graphics tablet (stylus) support** — tip contact and motion drive the
-  same gesture pipeline as the mouse, so a stylus draws like one. The eraser end of the
-  pen auto-switches to the Eraser tool on proximity and restores the previous tool on
-  proximity-out.
+- **Graphics tablet (stylus) support in `wlr-draw`**
+  ([#9](https://github.com/sjourdois/wlr-utils/pull/9), by
+  [@jadijadi](https://github.com/jadijadi)) — the tip acts as the left mouse button,
+  and the eraser end switches to the Eraser tool while it's near the tablet. `doctor`
+  now reports `tablet-v2`.
+
+### Changed
+
+- `wlr-draw` says how to finish a text label: the status chip reads "Enter to finish"
+  and the help lists Enter / Esc, whose key names are now translated.
+- Dependency refresh: edgefirst-egl 0.30, egui/egui_glow 0.36.2, pipewire 0.10.1.
+
+### Fixed
+
+- `wlr-draw`'s help legend no longer overlaps longer key names with their descriptions.
 
 ## 1.7.0 — 2026-08-19
 

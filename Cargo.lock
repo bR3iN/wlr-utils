@@ -3061,7 +3061,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-capture"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "edgefirst-egl",
  "egui",
@@ -3089,7 +3089,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-chooser"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3106,7 +3106,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-draw"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3125,7 +3125,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-i18n"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "i18n-embed",
  "rust-embed",
@@ -3134,7 +3134,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-peek"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3148,7 +3148,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-shot"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "clap",
@@ -3162,7 +3162,7 @@ dependencies = [
 
 [[package]]
 name = "wlr-utils"
-version = "1.7.0"
+version = "1.8.0"
 dependencies = [
  "anyhow",
  "wlr-chooser",
