@@ -168,8 +168,8 @@ fn pw_loop(
             if let Some(slice) = d.data() {
                 let slice = &slice[..n_bytes.min(slice.len())];
                 let mut q = pcm_cb.lock().unwrap();
-                for s in slice.chunks_exact(4) {
-                    q.push_back(f32::from_le_bytes([s[0], s[1], s[2], s[3]]));
+                for &s in slice.as_chunks::<4>().0 {
+                    q.push_back(f32::from_le_bytes(s));
                 }
             }
         })
@@ -384,8 +384,8 @@ mod fallback {
                 let bytes = out.data(0);
                 if bytes.len() >= n * 4 {
                     let mut q = pcm.lock().unwrap();
-                    for b in bytes[..n * 4].chunks_exact(4) {
-                        q.push_back(f32::from_le_bytes([b[0], b[1], b[2], b[3]]));
+                    for &b in bytes[..n * 4].as_chunks::<4>().0 {
+                        q.push_back(f32::from_le_bytes(b));
                     }
                 }
             }

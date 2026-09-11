@@ -1637,10 +1637,8 @@ impl Dispatch<ExtImageCopyCaptureSessionV1, ()> for State {
             #[cfg(feature = "gpu")]
             Event::DmabufFormat { format, modifiers } => {
                 // modifiers: array of native-endian u64.
-                let mods = modifiers
-                    .chunks_exact(8)
-                    .map(|c| u64::from_ne_bytes(c.try_into().unwrap()))
-                    .collect();
+                let (words, _) = modifiers.as_chunks::<8>();
+                let mods = words.iter().map(|&w| u64::from_ne_bytes(w)).collect();
                 d.dmabuf_formats.push((format, mods));
             }
             // A constraints group ends with `done`; flag a (re)allocation so a
