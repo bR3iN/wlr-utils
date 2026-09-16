@@ -54,16 +54,17 @@ wlr-shot = { path = "../wlr-shot", version = "1.8.0", default-features = false, 
 wlr-draw = { path = "../wlr-draw", version = "1.8.0" }
 anyhow.workspace = true
 
-# A single Debian package shipping every tool, in place of one .deb per crate. EGL/GL are
-# dlopen'd at runtime, so `$auto` (ldd-based) can't see them — name `libegl1` explicitly;
-# the linked libs (FFmpeg, PipeWire, Tesseract, gbm, D-Bus…) are picked up automatically.
+# A single Debian package shipping every tool, in place of one .deb per crate. EGL/GL and
+# fontconfig are dlopen'd at runtime, so `$auto` (ldd-based) can't see them — name
+# `libegl1` and `libfontconfig1` explicitly; the linked libs (FFmpeg, PipeWire, Tesseract,
+# gbm, D-Bus…) are picked up automatically.
 # conflicts/replaces let it cleanly supersede any previously installed per-tool packages.
 [package.metadata.deb]
 maintainer = "Stéphane Jourdois <stephane@jourdois.fr>"
 section = "utils"
 priority = "optional"
 license-file = ["../../LICENSE-MIT", "0"]
-depends = "$auto, libegl1"
+depends = "$auto, libegl1, libfontconfig1"
 conflicts = "wlr-chooser, wlr-shot, wlr-peek, wlr-draw, wlr-pip"
 replaces = "wlr-chooser, wlr-shot, wlr-peek, wlr-draw, wlr-pip"
 extended-description = """\

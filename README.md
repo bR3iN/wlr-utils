@@ -63,6 +63,7 @@ Runtime libraries:
 | Library | Needed by | Why |
 | --- | --- | --- |
 | `libegl1` | every tool | EGL/GLES overlay rendering |
+| `libfontconfig1` | every tool | looking up the UI font; without it the overlay falls back to the embedded fonts, which have no CJK coverage |
 | `libgbm` (Mesa) | every tool | zero-copy GPU capture path; pass `--no-gpu` (or set `WLR_NO_GPU=1`) to capture through shared memory instead |
 | `xdg-desktop-portal-wlr` ≥ 0.8 | `wlr-chooser` | portal-based picking |
 | `zwlr-foreign-toplevel-management-v1` | `wlr-switcher` | focusing windows |
