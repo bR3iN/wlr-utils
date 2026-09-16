@@ -56,7 +56,7 @@ glow = "0.17" # must match the glow version egui_glow uses (0.36 is still on 0.1
 egui_glow = "0.36"
 libloading = "0.9.0"
 clap = { version = "4.6.6", features = ["derive"] }
-fontdb = { version = "0.24.0", default-features = false, features = ["fontconfig"] }
+fontconfig = { version = "0.11.0", default-features = false, features = ["dlopen"] }
 gbm = { version = "0.18.0", default-features = false }
 # Native FFmpeg bindings for hardware/software video encoding (the `video` feature).
 # 9.x adapts at build time to whichever system libav* it finds (needs the -dev packages).

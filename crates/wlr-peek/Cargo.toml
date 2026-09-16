@@ -59,7 +59,7 @@ maintainer = "Stéphane Jourdois <stephane@jourdois.fr>"
 section = "utils"
 priority = "optional"
 license-file = ["../../LICENSE-MIT", "0"]
-depends = "$auto, libegl1"
+depends = "$auto, libegl1, libfontconfig1"
 extended-description = """\
 A screen inspection tool for wlroots compositors built on the shared wlr-capture \
 engine: a colour picker (pipette) with a magnifying loupe, a frozen full-screen \
