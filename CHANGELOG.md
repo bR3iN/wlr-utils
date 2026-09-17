@@ -4,6 +4,26 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/), and this project adheres to
 [Semantic Versioning](https://semver.org/).
 
+## Unreleased
+
+### Changed
+
+- **Font lookup now goes through fontconfig**
+  ([#10](https://github.com/sjourdois/wlr-utils/pull/10), by
+  [@bR3iN](https://github.com/bR3iN)) — the overlays start noticeably faster, since
+  fonts are resolved from the system's fontconfig cache instead of scanning every
+  installed font at launch. How the `font` and `cjk-font` theme keys are resolved
+  changes a little:
+  - family names are matched the way fontconfig matches them: case and spacing no
+    longer matter, and aliases such as `monospace` or `sans-serif` now work;
+  - a `font` family that isn't installed now falls back to your system's default
+    font rather than egui's built-in one, without a warning — check the spelling if
+    the overlay doesn't look the way you expect;
+  - a `cjk-font` that isn't installed is still skipped in favour of auto-detection.
+
+  `libfontconfig1` is now a runtime dependency (added to the `.deb`s). Without it,
+  the overlays fall back to egui's embedded fonts, which don't cover CJK.
+
 ## 1.8.0 — 2026-09-11
 
 ### Added
